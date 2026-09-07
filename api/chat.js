@@ -15,9 +15,14 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'Falta el mensaje en la consulta.' });
   }
 
-  const apiKey = process.env.OPENROUTER_API_KEY;
+  // Clave del usuario desde el header o tu variable de entorno en Vercel
+  const userKey = req.headers['x-user-key'] ? req.headers['x-user-key'].trim() : null;
+  const apiKey = userKey || process.env.OPENROUTER_API_KEY || process.env.GEMINI_API_KEY;
+
   if (!apiKey) {
-    return res.status(500).json({ error: 'Falta configurar OPENROUTER_API_KEY en Vercel.' });
+    return res.status(400).json({ 
+      error: 'No se detectó ninguna API Key. Ingresa tu clave de Gemini o OpenRouter en la barra superior.' 
+    });
   }
 
   try {
@@ -27,7 +32,7 @@ export default async function handler(req, res) {
 
     const query = String(mensaje || '').toLowerCase();
 
-    // 1. Detección de intenciones y filtros en la consulta
+    // 1. Detección de filtros y scoring en memoria
     const aniosDetectados = query.match(/\b(20\d{2})\b/g) || [];
     const festivales = ['cannes', 'el ojo', 'clio', 'd&ad', 'eurobest', 'dubai lynx'].filter(f => query.includes(f));
     const categorias = ['outdoor', 'film', 'direct', 'print', 'pr', 'design', 'activation', 'purpose', 'media', 'creative data'].filter(c => query.includes(c));
@@ -38,7 +43,6 @@ export default async function handler(req, res) {
       .split(/\s+/)
       .filter(w => w.length > 3 && !palabrasIgnoradas.has(w));
 
-    // 2. Sistema de Scoring con conversión explícita a String
     const calificadas = todasLasCampanas.map(c => {
       let score = 0;
       const metales = String(c.METAL_SUMMARY || c.METAL || '').toLowerCase();
@@ -49,29 +53,19 @@ export default async function handler(req, res) {
       const anio = String(c.AÑO || c.ANIO || '');
       const board = String(c['ANALISIS BOARD'] || '').toLowerCase();
 
-      // Priorización de metales mayores
       if (metales.includes('grand prix')) score += 25;
       else if (metales.includes('gold')) score += 15;
       else if (metales.includes('silver')) score += 8;
       else if (metales.includes('bronze')) score += 4;
 
-      // Coincidencia por año
       if (aniosDetectados.length > 0) {
         if (aniosDetectados.includes(anio)) score += 30;
         else score -= 15;
       }
 
-      // Coincidencia por festival
-      festivales.forEach(f => {
-        if (fest.includes(f)) score += 20;
-      });
+      festivales.forEach(f => { if (fest.includes(f)) score += 20; });
+      categorias.forEach(catItem => { if (cat.includes(catItem)) score += 25; });
 
-      // Coincidencia por categoría
-      categorias.forEach(catItem => {
-        if (cat.includes(catItem)) score += 25;
-      });
-
-      // Coincidencia por palabras clave
       keywords.forEach(kw => {
         if (titulo.includes(kw)) score += 30;
         if (marca.includes(kw)) score += 25;
@@ -81,11 +75,9 @@ export default async function handler(req, res) {
       return { ...c, _score: score };
     });
 
-    // 3. Selección de las 40 campañas con mejor puntaje
     calificadas.sort((a, b) => b._score - a._score);
     const seleccionadas = calificadas.slice(0, 40);
 
-    // 4. Formateo de las piezas seleccionadas
     const baseSintetizada = seleccionadas.map((c, i) => {
       const titulo = String(c.Title || c.TITULO_PIEZA || 'S/T');
       const marca = String(c.MARCA || 'S/M');
@@ -106,51 +98,85 @@ export default async function handler(req, res) {
     }).join('\n');
 
     const promptSistema = `
-Eres un analista estratégico y jurado de Cannes Lions.
-Tienes sobre la mesa una selección optimizada de campañas relevantes:
+Eres un analista estratégico y jurado experto de festivales como Cannes Lions.
+Tienes sobre la mesa una selección optimizada de campañas relevantes de nuestra base:
 
-SELECCIÓN DE CASOS:
+SELECCIÓN DE CASOS RELEVANTES:
 ${baseSintetizada}
 
-PAUTAS DE RESPUESTA:
-1. Responde de forma directa, analítica y sin roleplay ni acotaciones teatrales.
-2. Si solicitan un versus:
+INSTRUCCIONES CLAVE:
+1. Responde de forma directa, analítica y sin rodeos corporativos ni roleplay teatral.
+2. Si piden un versus o comparativa:
    - Contrasta ganadoras (Grand Prix / Gold) frente a Shortlists / No ganadoras.
-   - Presenta la síntesis comparativa en una **Tabla Markdown** (Columnas: Caso & Marca | Metal | Tensión / Insight | Brecha Estratégica).
-   - Analiza la diferencia entre la transformación de negocio/cultural vs. la mera representación superficial.
-3. Cita nombres exactos de piezas y marcas presentes en el listado.
-4. Concluye con una pregunta estratégica orientada al brief o reto creativo.
+   - Presenta la síntesis comparativa mediante una **Tabla Markdown** limpia (Columnas: Caso & Marca | Metal | Tensión / Insight | Brecha Estratégica).
+   - Analiza por qué la idea ganadora transformó el negocio o la cultura frente a la no ganadora.
+3. Cita obligatoriamente los nombres y marcas exactas presentes en la lista.
+4. Concluye con una pregunta estratégica orientada a desafiar el brief o reto planteado.
 `;
 
-    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-        "HTTP-Referer": "https://vercel.com",
-        "X-Title": "Festival AI"
-      },
-      body: JSON.stringify({
-        model: "minimax/minimax-m3:free",
-        messages: [
-          { role: "system", content: promptSistema },
-          { role: "user", content: mensaje }
+    let respuestaTexto = null;
+
+    // 2. DETECCIÓN AUTOMÁTICA DEL PROVEEDOR SEGÚN LA API KEY
+    const esGemini = apiKey.startsWith('AIzaSy');
+
+    if (esGemini) {
+      // LLAMADA DIRECTA A GOOGLE GEMINI
+      const urlGemini = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+      const payloadGemini = {
+        contents: [
+          {
+            role: 'user',
+            parts: [{ text: `${promptSistema}\n\nConsulta: ${mensaje}` }]
+          }
         ],
-        temperature: 0.2,
-        max_tokens: 1500
-      })
-    });
+        generationConfig: {
+          temperature: 0.2,
+          maxOutputTokens: 1500
+        }
+      };
 
-    const data = await response.json();
+      const resp = await fetch(urlGemini, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payloadGemini)
+      });
 
-    if (!response.ok) {
-      const err = data.error?.message || response.statusText;
-      return res.status(500).json({ error: `Error OpenRouter: ${err}` });
+      const data = await resp.json();
+      if (!resp.ok) {
+        return res.status(500).json({ error: `Error de Google Gemini: ${data.error?.message || resp.statusText}` });
+      }
+      respuestaTexto = data.candidates?.[0]?.content?.parts?.[0]?.text;
+
+    } else {
+      // LLAMADA A OPENROUTER (MiniMax u otros)
+      const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer': 'https://vercel.com',
+          'X-Title': 'Festival AI'
+        },
+        body: JSON.stringify({
+          model: 'minimax/minimax-m3:free',
+          messages: [
+            { role: 'system', content: promptSistema },
+            { role: 'user', content: mensaje }
+          ],
+          temperature: 0.2,
+          max_tokens: 1500
+        })
+      });
+
+      const data = await resp.json();
+      if (!resp.ok) {
+        return res.status(500).json({ error: `Error de OpenRouter: ${data.error?.message || resp.statusText}` });
+      }
+      respuestaTexto = data.choices?.[0]?.message?.content;
     }
 
-    const respuestaTexto = data.choices?.[0]?.message?.content;
     if (!respuestaTexto) {
-      return res.status(500).json({ error: 'Respuesta vacía del proveedor.' });
+      return res.status(500).json({ error: 'Respuesta vacía del proveedor. Reintenta la consulta.' });
     }
 
     return res.status(200).json({ respuesta: respuestaTexto });
