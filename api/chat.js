@@ -37,12 +37,15 @@ TU MISIÓN EN ESTE PING-PONG CREATIVO:
 4. Si el usuario te presenta un reto o brief, dale giros conceptuales y cierra siempre devolviendo la pelota con una pregunta clave.
 `;
 
-    // Lista rotativa en cascada: si uno falla o deja de existir, prueba el siguiente
+    // Cadena de fallback basada exactamente en tus modelos con cuota disponible (500 RPD primero)
     const modelosDisponibles = [
-      'gemini-3.6-flash',
-      'gemini-2.5-flash',
-      'gemini-1.5-flash-latest',
-      'gemini-pro'
+      'gemini-3.5-flash-lite',
+      'gemini-3.1-flash-lite',
+      'gemini-3.8-flash',
+      'gemini-3.7-flash',
+      'gemini-3.5-flash',
+      'gemini-2.5-flash-lite',
+      'gemini-2.5-flash'
     ];
 
     let respuesta = null;
@@ -50,7 +53,6 @@ TU MISIÓN EN ESTE PING-PONG CREATIVO:
 
     for (const nombreModelo of modelosDisponibles) {
       try {
-        console.log(`Intentando conectar con modelo: ${nombreModelo}`);
         const model = genAI.getGenerativeModel({
           model: nombreModelo,
           systemInstruction: promptSistema
@@ -59,16 +61,14 @@ TU MISIÓN EN ESTE PING-PONG CREATIVO:
         const result = await model.generateContent(mensaje);
         respuesta = result.response.text();
         
-        // Si generó texto con éxito, cortamos el bucle
         if (respuesta) break;
       } catch (err) {
-        console.warn(`Falló ${nombreModelo}: ${err.message}. Probando siguiente opción...`);
         ultimoError = err;
       }
     }
 
     if (!respuesta) {
-      throw new Error(`Ningún modelo de la lista respondió. Último error: ${ultimoError?.message}`);
+      throw new Error(`Modelos saturados o límite alcanzado. Detalle: ${ultimoError?.message}`);
     }
 
     return res.status(200).json({ respuesta });
