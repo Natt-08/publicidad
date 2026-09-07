@@ -5,7 +5,6 @@ export const config = {
   maxDuration: 60
 };
 
-// Función para normalizar texto (quita tildes, mayúsculas y caracteres raros)
 function normalizar(texto) {
   return String(texto || '')
     .normalize('NFD')
@@ -20,8 +19,6 @@ export default async function handler(req, res) {
   const { mensaje, historial = [] } = req.body || {};
   if (!mensaje) return res.status(400).json({ error: 'Falta el mensaje en la consulta.' });
 
-  // 1. LLAVES DESDE VERCEL (Seguridad total)
-  // Las prioriza desde Vercel (process.env) pero acepta headers por si usas la interfaz web
   const keyGemini = process.env.GEMINI_API_KEY || req.headers['x-gemini-key'];
   const keyGroq = process.env.GROQ_API_KEY || req.headers['x-groq-key'];
   const keyOpenRouter = process.env.OPENROUTER_API_KEY || req.headers['x-openrouter-key'];
@@ -36,20 +33,17 @@ export default async function handler(req, res) {
     const todasLasCampanas = JSON.parse(readFileSync(filePath, 'utf8'));
     const queryNorm = normalizar(mensaje);
 
-    // 2. EXPANSIÓN SEMÁNTICA (Anti-Ceguera)
     const terminosRelevantes = [];
     if (queryNorm.includes('termograf') || queryNorm.includes('calor') || queryNorm.includes('infrarroj')) terminosRelevantes.push('termograf', 'termic', 'thermal', 'infrarroj', 'infrared', 'eva clinic', 'untouchables');
     if (queryNorm.includes('cancer') || queryNorm.includes('mama') || queryNorm.includes('tumor')) terminosRelevantes.push('cancer', 'breast', 'oncolog', 'untouchables');
     if (queryNorm.includes('gaming') || queryNorm.includes('videojuego') || queryNorm.includes('esports')) terminosRelevantes.push('gaming', 'videojuego', 'esports', 'twitch', 'gamer', 'stevenage', 'fortnite');
     if (queryNorm.includes('halloween') || queryNorm.includes('terror') || queryNorm.includes('miedo')) terminosRelevantes.push('halloween', 'terror', 'miedo', 'horror', 'thriller');
 
-    // 3. KEYWORDS Y EXCLUSIONES
     const palabrasProhibidas = new Set(['para', 'como', 'este', 'esta', 'campanas', 'versus', 'piezas', 'ganaron', 'hacer', 'unas', 'unos', 'sobre', 'entre', 'base', 'datos', 'links', 'link', 'dame', 'quiero', 'existe', 'alguna', 'nada', 'seguro', 'cannes', 'lions']);
     const keywords = queryNorm.replace(/[^\w\s]/gi, '').split(/\s+/).filter(w => w.length > 3 && !palabrasProhibidas.has(w));
     const aniosDetectados = queryNorm.match(/\b(20\d{2})\b/g) || [];
     const festivales = ['cannes', 'el ojo', 'clio', 'd&ad', 'eurobest'].filter(f => queryNorm.includes(f));
 
-    // 4. SCORING INTELIGENTE
     const calificadas = todasLasCampanas.map(c => {
       let score = 0;
       const metales = normalizar(c.METAL_SUMMARY || c.METAL);
@@ -81,9 +75,8 @@ export default async function handler(req, res) {
     });
 
     calificadas.sort((a, b) => b._score - a._score);
-    const seleccionadas = calificadas.slice(0, 12); // Tomamos el TOP 12 más relevante
+    const seleccionadas = calificadas.slice(0, 12);
 
-    // 5. CONTEXTO DINÁMICO (Contexto profundo para el top 3)
     const baseSintetizada = seleccionadas.map((c, i) => {
       const titulo = String(c.Title || c.TITULO_PIEZA || 'S/T');
       const marca = String(c.MARCA || 'S/M');
@@ -92,7 +85,6 @@ export default async function handler(req, res) {
       const linkBoard = c['Board image'] || c.URL || c.LINK || c.board_image || 'No disponible';
       
       let board = String(c['ANALISIS BOARD'] || '').replace(/\s+/g, ' ').trim();
-      // Lectura profunda de 1500 caracteres para los 3 mejores resultados, lectura rápida para el resto.
       const maxChars = i < 3 ? 1500 : 300; 
       if (board.length > maxChars) board = board.substring(0, maxChars) + '...';
 
@@ -116,7 +108,6 @@ REGLAS ESTRICTAS (ANTI-ALUCINACIONES):
 3. Si piden enlaces, usa Markdown: [Ver Board Oficial](URL).
 `;
 
-    // 6. PREPARACIÓN DE HISTORIAL (Memoria de 30 mensajes)
     const historialLargo = historial.slice(-30);
     const mensajesOpenAI = [
       { role: 'system', content: promptSistema },
@@ -124,86 +115,130 @@ REGLAS ESTRICTAS (ANTI-ALUCINACIONES):
       { role: 'user', content: mensaje }
     ];
     
-    // Traducción de formato para Gemini
     const historialGemini = historialLargo.map(msg => ({
       role: msg.role === 'assistant' ? 'model' : 'user',
       parts: [{ text: msg.content }]
     }));
-    
-    const payloadGemini = {
-      contents: [...historialGemini, { role: 'user', parts: [{ text: `${promptSistema}\n\nConsulta actual: ${mensaje}` }] }],
-      generationConfig: { temperature: 0.2, maxOutputTokens: 2000 }
-    };
 
-    // 7. FUNCIONES DE LLAMADA A LAS IA
-    async function llamarGemini() {
+    // 5 MODELOS POR CADA PROVEEDOR PARA ROTACIÓN AUTOMÁTICA
+    const modelosGemini = [
+      'gemini-3.8-flash',
+      'gemini-3.7-flash',
+      'gemini-3.6-flash',
+      'gemini-3.5-flash-lite',
+      'gemini-2.5-flash'
+    ];
+
+    const modelosGroq = [
+      'groq/compound',
+      'groq/compound-mini',
+      'llama3-70b-8192',
+      'llama3-8b-8192',
+      'mixtral-8x7b-32768'
+    ];
+
+    const modelosOpenRouter = [
+      'google/gemma-4-31b:free',
+      'nvidia/nemotron-3-ultra:free',
+      'poolside/laguna-s-2.1:free',
+      'thinkingmachines/inkling:free',
+      'cohere/north-mini-code:free'
+    ];
+
+    // FUNCIONES DE ROTACIÓN CON MULTI-MODELO
+    async function rotarGemini() {
       if (!keyGemini) throw new Error('Key Gemini ausente');
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${keyGemini}`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payloadGemini)
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error?.message || 'Error Gemini');
-      return data.candidates?.[0]?.content?.parts?.[0]?.text;
+      for (const modelo of modelosGemini) {
+        try {
+          const payload = {
+            contents: [...historialGemini, { role: 'user', parts: [{ text: `${promptSistema}\n\nConsulta actual: ${mensaje}` }] }],
+            generationConfig: { temperature: 0.2, maxOutputTokens: 2000 }
+          };
+          const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${keyGemini}`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+          });
+          const data = await res.json();
+          if (res.ok && data.candidates?.[0]?.content?.parts?.[0]?.text) {
+            return data.candidates[0].content.parts[0].text;
+          }
+        } catch (e) {
+          console.warn(`Gemini (${modelo}) falló, intentando siguiente...`);
+        }
+      }
+      throw new Error('Todos los modelos de Gemini fallaron.');
     }
 
-    async function llamarGroq() {
+    async function rotarGroq() {
       if (!keyGroq) throw new Error('Key Groq ausente');
-      const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST', headers: { 'Authorization': `Bearer ${keyGroq}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: 'llama3-70b-8192', messages: mensajesOpenAI, temperature: 0.2, max_tokens: 2000 })
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error?.message || 'Error Groq');
-      return data.choices?.[0]?.message?.content;
+      for (const modelo of modelosGroq) {
+        try {
+          const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+            method: 'POST', headers: { 'Authorization': `Bearer ${keyGroq}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ model: modelo, messages: mensajesOpenAI, temperature: 0.2, max_tokens: 2000 })
+          });
+          const data = await res.json();
+          if (res.ok && data.choices?.[0]?.message?.content) {
+            return data.choices[0].message.content;
+          }
+        } catch (e) {
+          console.warn(`Groq (${modelo}) falló, intentando siguiente...`);
+        }
+      }
+      throw new Error('Todos los modelos de Groq fallaron.');
     }
 
-    async function llamarOpenRouter() {
+    async function rotarOpenRouter() {
       if (!keyOpenRouter) throw new Error('Key OpenRouter ausente');
-      const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST', headers: { 
-          'Authorization': `Bearer ${keyOpenRouter}`, 
-          'Content-Type': 'application/json', 
-          'HTTP-Referer': 'https://festival-ai.vercel.app', 
-          'X-Title': 'Festival AI' 
-        },
-        body: JSON.stringify({ 
-          model: 'openrouter/free', // <--- EL ROUTER AUTOMÁTICO GRATUITO
-          messages: mensajesOpenAI, 
-          temperature: 0.35, 
-          presence_penalty: 0.4, 
-          max_tokens: 2000 
-        })
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error?.message || 'Error OpenRouter');
-      return data.choices?.[0]?.message?.content;
+      for (const modelo of modelosOpenRouter) {
+        try {
+          const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+            method: 'POST', headers: { 
+              'Authorization': `Bearer ${keyOpenRouter}`, 
+              'Content-Type': 'application/json', 
+              'HTTP-Referer': 'https://festival-ai.vercel.app', 
+              'X-Title': 'Festival AI' 
+            },
+            body: JSON.stringify({ 
+              model: modelo, 
+              messages: mensajesOpenAI, 
+              temperature: 0.35, 
+              presence_penalty: 0.4, 
+              max_tokens: 2000 
+            })
+          });
+          const data = await res.json();
+          if (res.ok && data.choices?.[0]?.message?.content) {
+            return data.choices[0].message.content;
+          }
+        } catch (e) {
+          console.warn(`OpenRouter (${modelo}) falló, intentando siguiente...`);
+        }
+      }
+      throw new Error('Todos los modelos de OpenRouter fallaron.');
     }
 
-    // 8. CASCADA DE RUTEO (WATERFALL)
     let respuestaTexto = null;
 
     if (estrategia === 'auto') {
       try {
-        respuestaTexto = await llamarGemini();
+        respuestaTexto = await rotarGemini();
       } catch (err1) {
-        console.warn('Fallo Gemini, rutando a Groq...', err1.message);
         try {
-          respuestaTexto = await llamarGroq();
+          respuestaTexto = await rotarGroq();
         } catch (err2) {
-          console.warn('Fallo Groq, rutando a OpenRouter...', err2.message);
           try {
-            respuestaTexto = await llamarOpenRouter();
+            respuestaTexto = await rotarOpenRouter();
           } catch (err3) {
-            throw new Error(`Cascada colapsada. Gemini y Groq fallaron. Error final (OpenRouter): ${err3.message}`);
+            throw new Error(`Cascada colapsada globalmente. Ningún proveedor ni modelo respondió.`);
           }
         }
       }
     } else if (estrategia === 'gemini') { 
-      respuestaTexto = await llamarGemini(); 
+      respuestaTexto = await rotarGemini(); 
     } else if (estrategia === 'groq') { 
-      respuestaTexto = await llamarGroq(); 
+      respuestaTexto = await rotarGroq(); 
     } else if (estrategia === 'openrouter') { 
-      respuestaTexto = await llamarOpenRouter(); 
+      respuestaTexto = await rotarOpenRouter(); 
     }
 
     if (!respuestaTexto) return res.status(500).json({ error: 'Respuesta vacía del proveedor.' });
