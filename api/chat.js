@@ -11,9 +11,9 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'Falta el mensaje en la consulta.' });
   }
 
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) {
-    return res.status(500).json({ error: 'Falta configurar GEMINI_API_KEY en Vercel.' });
+    return res.status(500).json({ error: 'Falta configurar OPENROUTER_API_KEY en Vercel.' });
   }
 
   try {
@@ -21,7 +21,7 @@ export default async function handler(req, res) {
     const fileData = readFileSync(filePath, 'utf8');
     const todasLasCampanas = JSON.parse(fileData);
 
-    // Mapeo estructurado y compacto de los casos
+    // Formato sintetizado (~12k tokens)
     const baseSintetizada = todasLasCampanas.map((c, i) => {
       const metal = (c.METAL || c.metal || 'SHORTLIST / NO GANADORA').toUpperCase();
       const pieza = c.TITULO_PIEZA || c.titulo_pieza || 'Sin título';
@@ -35,51 +35,51 @@ export default async function handler(req, res) {
     }).join('\n');
 
     const promptSistema = `
-Eres un analista estratégico y director creativo senior de festivales publicitarios. 
-Tienes acceso a una base de datos de 300 campañas (ganadoras de metales altos y piezas que quedaron en shortlist o no ganaron):
+Eres un analista estratégico y director creativo senior de festivales como Cannes Lions.
+Tienes sobre la mesa un archivo de 300 campañas (metales pesados frente a shortlists y no ganadoras):
 
-=== REGISTRO DE CASOS ===
+=== BASE DE CAMPAÑAS ===
 ${baseSintetizada}
-=========================
+========================
 
-REGLAS DE INTERACCIÓN (CUMPLIMIENTO ESTRICTO):
-1. PROHIBIDO EL ROLEPLAY teatral, las acotaciones entre paréntesis (tipo *hago esto*), las poses y los monólogos sobre actuar como jurado. Habla de forma directa, inteligente, reflexiva y colaborativa.
-2. PROFUNDIDAD ANALÍTICA REAL: Cuando analices por qué una campaña ganó frente a las que no ganaron, haz autopsias detalladas y fundamentadas en los datos del registro.
-   - Desmenuza la tensión: Compara la fricción cultural real de una ganadora contra la obviedad temática de una no ganadora.
-   - Desmenuza la mecánica: Explica si la idea fue un truco cosmético aislado o una solución integrada al producto/cultura.
-3. CONTRASTE 1 A 1 CON DATOS: Cita obligatoriamente por su nombre y marca al menos 2 casos ganadores y 2 casos no ganadores de la lista para mostrar la brecha estratégica exacta entre ambos.
-4. Cierra siempre con una pregunta estratégica abierta sobre el problema o brief que estamos resolviendo para continuar rebotando ideas.
+INSTRUCCIONES CLAVE:
+1. PROHIBIDO EL TEATRO O ROLEPLAY: Cero acotaciones entre paréntesis (tipo *te miro*, *suspiro*). Habla como un colega creativo directo, reflexivo y certero.
+2. ANÁLISIS DE FONDO:
+   - Diferencia la fricción cultural real de una ganadora frente al cliché bienintencionado de una no ganadora.
+   - Explica si la idea resolvió una tensión del negocio o si fue solo cosmética.
+3. EVIDENCIA CONCRETA: Cita obligatoriamente al menos 2 piezas ganadoras y 2 piezas no ganadoras de la lista (con marcas y nombres exactos) para contrastarlas cara a cara.
+4. Cierra siempre con una pregunta estratégica abierta para seguir explorando el reto.
 `;
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${apiKey}`;
-
-    const payload = {
-      contents: [
-        {
-          role: 'user',
-          parts: [{ text: `${promptSistema}\n\nConsulta/Brief: ${mensaje}` }]
-        }
-      ],
-      generationConfig: {
-        temperature: 0.5,
-        maxOutputTokens: 2048
-      }
-    };
-
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
+    // Llamada con soporte oficial de razonamiento de OpenRouter
+    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://vercel.com",
+        "X-Title": "Festival AI"
+      },
+      body: JSON.stringify({
+        model: "minimax/minimax-m3:free",
+        messages: [
+          { role: "system", content: promptSistema },
+          { role: "user", content: mensaje }
+        ],
+        reasoning: { enabled: true },
+        temperature: 0.4,
+        max_tokens: 2048
+      })
     });
 
     const data = await response.json();
 
     if (!response.ok) {
       const err = data.error?.message || response.statusText;
-      return res.status(500).json({ error: `Error de la API: ${err}` });
+      return res.status(500).json({ error: `Error de OpenRouter: ${err}` });
     }
 
-    const respuestaTexto = data.candidates?.[0]?.content?.parts?.[0]?.text || 'No se obtuvo respuesta.';
+    const respuestaTexto = data.choices?.[0]?.message?.content || 'No se obtuvo respuesta del modelo.';
     return res.status(200).json({ respuesta: respuestaTexto });
 
   } catch (error) {
