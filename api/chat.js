@@ -13,7 +13,7 @@ export default async function handler(req, res) {
   }
 
   if (!process.env.GEMINI_API_KEY) {
-    return res.status(500).json({ error: 'Falta configurar GEMINI_API_KEY en las variables de entorno de Vercel.' });
+    return res.status(500).json({ error: 'Falta configurar GEMINI_API_KEY en Vercel.' });
   }
 
   const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
@@ -37,18 +37,44 @@ TU MISIÓN EN ESTE PING-PONG CREATIVO:
 4. Si el usuario te presenta un reto o brief, dale giros conceptuales y cierra siempre devolviendo la pelota con una pregunta clave.
 `;
 
-    const model = genAI.getGenerativeModel({ 
-      model: 'gemini-2.0-flash',
-      systemInstruction: promptSistema
-    });
+    // Lista rotativa en cascada: si uno falla o deja de existir, prueba el siguiente
+    const modelosDisponibles = [
+      'gemini-3.6-flash',
+      'gemini-2.5-flash',
+      'gemini-1.5-flash-latest',
+      'gemini-pro'
+    ];
 
-    const result = await model.generateContent(mensaje);
-    const respuesta = result.response.text();
+    let respuesta = null;
+    let ultimoError = null;
 
-    return res.status(200).json({ respuesta: respuesta || 'Sin respuesta.' });
+    for (const nombreModelo of modelosDisponibles) {
+      try {
+        console.log(`Intentando conectar con modelo: ${nombreModelo}`);
+        const model = genAI.getGenerativeModel({
+          model: nombreModelo,
+          systemInstruction: promptSistema
+        });
+
+        const result = await model.generateContent(mensaje);
+        respuesta = result.response.text();
+        
+        // Si generó texto con éxito, cortamos el bucle
+        if (respuesta) break;
+      } catch (err) {
+        console.warn(`Falló ${nombreModelo}: ${err.message}. Probando siguiente opción...`);
+        ultimoError = err;
+      }
+    }
+
+    if (!respuesta) {
+      throw new Error(`Ningún modelo de la lista respondió. Último error: ${ultimoError?.message}`);
+    }
+
+    return res.status(200).json({ respuesta });
 
   } catch (error) {
-    console.error('Error detallado:', error);
+    console.error('Error general:', error);
     return res.status(500).json({ error: error.message || 'Error interno del servidor' });
   }
 }
