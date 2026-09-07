@@ -5,12 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Festival AI — Jury Room & Benchmark</title>
   
-  <!-- Parser Markdown -->
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 
   <style>
     :root {
-      /* Paleta de la imagen (Golden / Ochre Festival) */
       --gold-50:  #FFFCEB;
       --gold-100: #FDF5C8;
       --gold-200: #FBE98C;
@@ -23,27 +21,24 @@
       --gold-900: #763A11;
       --gold-950: #441D04;
 
-      /* Estructura UI LibreChat Dark */
       --bg-sidebar: #121318;
       --bg-main: #181920;
       --bg-surface: #20212b;
       --bg-card: #272834;
       --border-subtle: #2d2f3d;
-      --border-gold: rgba(241, 166, 15, 0.25);
 
       --text-primary: #F3F4F6;
       --text-muted: #9CA3AF;
       --text-dim: #6B7280;
 
       --user-bubble: #272937;
-      --bot-bubble: transparent;
     }
 
     * {
       box-sizing: border-box;
       margin: 0;
       padding: 0;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     }
 
     body {
@@ -54,9 +49,7 @@
       overflow: hidden;
     }
 
-    /* =========================================
-       SIDEBAR (Estilo LibreChat)
-       ========================================= */
+    /* SIDEBAR */
     aside {
       width: 260px;
       background: var(--bg-sidebar);
@@ -64,7 +57,7 @@
       display: flex;
       flex-direction: column;
       flex-shrink: 0;
-      transition: all 0.3s ease;
+      transition: margin-left 0.3s ease;
       z-index: 20;
     }
 
@@ -119,7 +112,7 @@
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
-      transition: background 0.15s, color 0.15s;
+      transition: all 0.15s;
     }
 
     .history-item:hover, .history-item.active {
@@ -156,9 +149,7 @@
       font-size: 12px;
     }
 
-    /* =========================================
-       MAIN CHAT CONTAINER
-       ========================================= */
+    /* MAIN CHAT */
     main {
       flex: 1;
       display: flex;
@@ -168,7 +159,6 @@
       position: relative;
     }
 
-    /* Top Navigation Bar */
     .top-bar {
       height: 54px;
       padding: 0 20px;
@@ -206,35 +196,25 @@
       border-color: var(--gold-500);
     }
 
-    /* Selector de Modelos LibreChat Style */
-    .model-selector-btn {
-      display: flex;
-      align-items: center;
-      gap: 8px;
+    .btn-settings {
       background: var(--bg-surface);
       border: 1px solid var(--border-subtle);
+      color: var(--gold-200);
       padding: 6px 12px;
       border-radius: 8px;
-      color: var(--gold-200);
-      font-size: 13px;
+      font-size: 12.5px;
       font-weight: 600;
       cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
       transition: all 0.2s;
     }
 
-    .model-selector-btn:hover {
+    .btn-settings:hover {
       border-color: var(--gold-500);
     }
 
-    .model-dot {
-      width: 7px;
-      height: 7px;
-      border-radius: 50%;
-      background: var(--gold-500);
-      box-shadow: 0 0 8px var(--gold-500);
-    }
-
-    /* Chat Messages Stream */
     #chat-thread {
       flex: 1;
       overflow-y: auto;
@@ -253,7 +233,7 @@
       gap: 24px;
     }
 
-    /* Vista de Bienvenida (Estilo LibreChat / ChatGPT) */
+    /* Welcome Grid */
     .welcome-screen {
       text-align: center;
       margin: 40px auto 20px auto;
@@ -261,7 +241,7 @@
     }
 
     .welcome-title {
-      font-size: 32px;
+      font-size: 30px;
       font-weight: 700;
       color: var(--gold-300);
       letter-spacing: -0.5px;
@@ -346,7 +326,7 @@
     }
 
     .msg-body {
-      max-width: 82%;
+      max-width: 84%;
       font-size: 14.5px;
       color: var(--text-primary);
     }
@@ -367,7 +347,7 @@
       width: 100%;
     }
 
-    /* Render Markdown & Tablas Doradas */
+    /* Markdown Formats & Tables */
     .msg-body h1, .msg-body h2, .msg-body h3 {
       color: var(--gold-300);
       margin: 18px 0 10px 0;
@@ -376,31 +356,13 @@
     .msg-body h1 { font-size: 20px; border-bottom: 1px solid var(--border-subtle); padding-bottom: 6px; }
     .msg-body h2 { font-size: 17px; }
     .msg-body h3 { font-size: 15px; }
-
     .msg-body p { margin-bottom: 12px; }
     .msg-body p:last-child { margin-bottom: 0; }
+    .msg-body strong { color: var(--gold-200); font-weight: 600; }
+    .msg-body ul, .msg-body ol { margin: 8px 0 14px 22px; }
+    .msg-body li { margin-bottom: 6px; }
+    .msg-body hr { border: 0; height: 1px; background: var(--border-subtle); margin: 20px 0; }
 
-    .msg-body strong {
-      color: var(--gold-200);
-      font-weight: 600;
-    }
-
-    .msg-body ul, .msg-body ol {
-      margin: 8px 0 14px 22px;
-    }
-
-    .msg-body li {
-      margin-bottom: 6px;
-    }
-
-    .msg-body hr {
-      border: 0;
-      height: 1px;
-      background: var(--border-subtle);
-      margin: 20px 0;
-    }
-
-    /* Tablas estilo Cannes Benchmark */
     .msg-body table {
       width: 100%;
       border-collapse: collapse;
@@ -425,17 +387,10 @@
       border-bottom: 2px solid var(--gold-600);
     }
 
-    .msg-body tr:nth-child(even) {
-      background: rgba(255, 255, 255, 0.02);
-    }
+    .msg-body tr:nth-child(even) { background: rgba(255, 255, 255, 0.02); }
+    .msg-body tr:hover { background: rgba(241, 166, 15, 0.04); }
 
-    .msg-body tr:hover {
-      background: rgba(241, 166, 15, 0.04);
-    }
-
-    /* =========================================
-       INPUT BAR (Flotante LibreChat)
-       ========================================= */
+    /* INPUT CONTAINER */
     .input-container {
       position: absolute;
       bottom: 0;
@@ -477,9 +432,7 @@
       padding: 8px 0;
     }
 
-    #query-input::placeholder {
-      color: var(--text-dim);
-    }
+    #query-input::placeholder { color: var(--text-dim); }
 
     .btn-send {
       width: 36px;
@@ -493,18 +446,11 @@
       justify-content: center;
       cursor: pointer;
       font-weight: bold;
-      transition: background 0.2s, transform 0.1s;
+      transition: all 0.2s;
     }
 
-    .btn-send:hover {
-      background: var(--gold-400);
-    }
-
-    .btn-send:disabled {
-      background: var(--bg-card);
-      color: var(--text-dim);
-      cursor: not-allowed;
-    }
+    .btn-send:hover { background: var(--gold-400); }
+    .btn-send:disabled { background: var(--bg-card); color: var(--text-dim); cursor: not-allowed; }
 
     .disclaimer {
       font-size: 11.5px;
@@ -512,21 +458,65 @@
       margin-top: 8px;
     }
 
-    /* Scrollbar personalizada */
-    ::-webkit-scrollbar {
-      width: 6px;
-      height: 6px;
+    /* MODAL DE CONFIGURACIÓN */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.75);
+      backdrop-filter: blur(4px);
+      display: none;
+      justify-content: center;
+      align-items: center;
+      padding: 20px;
+      z-index: 100;
     }
-    ::-webkit-scrollbar-track {
-      background: transparent;
+
+    .modal-overlay.active { display: flex; }
+
+    .modal-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: 14px;
+      width: 100%;
+      max-width: 480px;
+      padding: 24px;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.8);
     }
-    ::-webkit-scrollbar-thumb {
-      background: var(--border-subtle);
-      border-radius: 3px;
+
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 18px;
     }
-    ::-webkit-scrollbar-thumb:hover {
-      background: var(--gold-700);
+
+    .modal-title { font-size: 18px; font-weight: 700; color: var(--gold-200); }
+    .btn-close { background: transparent; border: none; color: var(--text-muted); font-size: 20px; cursor: pointer; }
+
+    .form-group { margin-bottom: 16px; }
+    .form-group label { display: block; font-size: 12.5px; font-weight: 600; color: var(--text-muted); margin-bottom: 6px; }
+    .form-control {
+      width: 100%;
+      padding: 11px 14px;
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: 8px;
+      color: #fff;
+      font-size: 14px;
+      outline: none;
     }
+    .form-control:focus { border-color: var(--gold-500); }
+
+    .modal-actions {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 24px;
+      padding-top: 16px;
+      border-top: 1px solid var(--border-subtle);
+    }
+
+    .btn-save { background: var(--gold-500); color: #111; border: none; padding: 10px 20px; border-radius: 8px; font-weight: 600; cursor: pointer; }
+    .btn-clear { background: transparent; border: 1px solid var(--border-subtle); color: #ef4444; padding: 10px 16px; border-radius: 8px; font-size: 12.5px; cursor: pointer; }
   </style>
 </head>
 <body>
@@ -540,67 +530,64 @@
     </div>
 
     <div class="chat-history">
-      <div class="history-item active">🏆 Cannes 2020: GP vs Shortlist</div>
-      <div class="history-item">🏷️ Brand Purpose Audit</div>
-      <div class="history-item">🚗 Outdoor: Nissan vs Autos</div>
-      <div class="history-item">💡 Tensión cultural retail</div>
+      <div class="history-item active">🏆 Cannes 2020: Grand Prix vs Shortlist</div>
+      <div class="history-item">⚖️ IKEA: Buy With Your Time Audit</div>
+      <div class="history-item">🍔 Burger King: Stay Home Autopsy</div>
+      <div class="history-item">🌊 WWF: Your Plastic Diet</div>
     </div>
 
     <div class="sidebar-footer">
       <div class="user-badge">
         <div class="user-avatar">J</div>
-        <span>Jurado Creativo</span>
+        <span id="label-user">Jurado Creativo</span>
       </div>
-      <span style="font-size: 11px; color: var(--gold-500); font-weight: 600;">300+ Casos</span>
+      <span style="font-size: 11px; color: var(--gold-400); font-weight: 600;">Base Activa</span>
     </div>
   </aside>
 
-  <!-- MAIN VIEW -->
+  <!-- MAIN CHAT -->
   <main>
-    <!-- TOP BAR -->
     <div class="top-bar">
       <div class="top-bar-left">
         <button class="btn-toggle-sidebar" id="btn-toggle-sidebar" title="Alternar barra lateral">☰</button>
-        <div class="model-selector-btn">
-          <div class="model-dot"></div>
-          <span>Festival AI Engine</span>
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <div style="width: 7px; height: 7px; border-radius: 50%; background: var(--gold-500);"></div>
+          <span style="font-size: 13px; font-weight: 600; color: var(--gold-200);">Festival AI Engine</span>
         </div>
       </div>
-      <div style="font-size: 12px; color: var(--gold-300); font-weight: 600;">
-        Cannes Lions & Eurobest Benchmark
-      </div>
+      <button class="btn-settings" id="btn-open-settings">
+        ⚙️ <span id="label-settings">API Key</span>
+      </button>
     </div>
 
-    <!-- CHAT THREAD -->
     <div id="chat-thread">
       <div class="thread-inner" id="thread-inner">
         
-        <!-- Welcome Screen Inicial (LibreChat Style) -->
         <div class="welcome-screen" id="welcome-screen">
           <div class="welcome-title">Festival AI</div>
           <div class="welcome-subtitle">
-            Auditoría estratégica, autopsias de boards y benchmarking entre Grand Prix y Shortlists.
+            Auditoría de boards, benchmarking y detección de brechas estratégicas entre ganadoras y casos descartados.
           </div>
 
           <div class="cards-grid">
-            <div class="prompt-card" onclick="lanzarPrompt('Haz un versus estratégico entre las 5 mejores Grand Prix y 5 Shortlists de 2020 en Brand Purpose')">
-              <div class="prompt-card-title">⚖️ Grand Prix vs. Shortlist</div>
-              <div class="prompt-card-desc">Contrasta por qué unas cruzaron la línea y otras quedaron en mención.</div>
+            <div class="prompt-card" onclick="lanzarPrompt('Dame más detalle y autopsia estratégica sobre Stay Home of the Whopper')">
+              <div class="prompt-card-title">🍔 Stay Home of the Whopper</div>
+              <div class="prompt-card-desc">Revisa el board real: Couch Potatriot y entrega de Whoppers.</div>
             </div>
 
-            <div class="prompt-card" onclick="lanzarPrompt('¿Por qué Contract for Change de AB InBev ganó Grand Prix y qué le faltó a las no ganadoras de la misma categoría?')">
-              <div class="prompt-card-title">🔍 Autopsia de un Caso</div>
-              <div class="prompt-card-desc">Desmenuza "Contract for Change" frente a piezas reactivas.</div>
+            <div class="prompt-card" onclick="lanzarPrompt('Analiza BUY WITH YOUR TIME de IKEA: ¿por qué ganó Oro en Direct pero NO GANO en Titanium?')">
+              <div class="prompt-card-title">⏰ IKEA: Buy with your time</div>
+              <div class="prompt-card-desc">Contrasta mecánica promocional frente al descarte en Titanium.</div>
             </div>
 
-            <div class="prompt-card" onclick="lanzarPrompt('¿Qué patrones comunes tienen las piezas de Outdoor que no ganaron metal?')">
-              <div class="prompt-card-title">🚫 Patrones de Fracaso</div>
-              <div class="prompt-card-desc">Identifica clichés y superficialidad castigados por el jurado.</div>
+            <div class="prompt-card" onclick="lanzarPrompt('Haz un versus en Brand Purpose 2020: 3 Grand Prix frente a 3 que NO GANARON')">
+              <div class="prompt-card-title">⚖️ Grand Prix vs. Rechazadas</div>
+              <div class="prompt-card-desc">Tabla comparativa de transformación sistémica vs postureo.</div>
             </div>
 
-            <div class="prompt-card" onclick="lanzarPrompt('Tengo un brief de retail enfocado en sustentabilidad. ¿Qué fricción real deberíamos tocar para aspirar a Oro?')">
-              <div class="prompt-card-title">🎯 Desafío de Brief</div>
-              <div class="prompt-card-desc">Evalúa tensiones de negocio reales vs purpose-washing.</div>
+            <div class="prompt-card" onclick="lanzarPrompt('¿Por qué YOUR PLASTIC DIET de WWF quedó en shortlist masivo pero no convirtió a Grand Prix?')">
+              <div class="prompt-card-title">💳 WWF: Your Plastic Diet</div>
+              <div class="prompt-card-desc">Data visualisation impecable vs falta de cambio regulatorio real.</div>
             </div>
           </div>
         </div>
@@ -608,25 +595,53 @@
       </div>
     </div>
 
-    <!-- FLOATING INPUT BAR -->
     <div class="input-container">
       <form class="input-box-wrapper" id="chat-form">
         <input 
           type="text" 
           id="query-input" 
-          placeholder="Plantea un brief, un territorio o pide un versus comparativo..." 
+          placeholder="Plantea un brief o pide la autopsia de un caso..." 
           autocomplete="off" 
           required 
         />
-        <button type="submit" class="btn-send" id="btn-send" title="Enviar consulta">
-          ↑
-        </button>
+        <button type="submit" class="btn-send" id="btn-send" title="Enviar consulta">↑</button>
       </form>
       <div class="disclaimer">
-        Festival AI utiliza criterios de evaluación real de festivales publicitarios. Respuestas analíticas directas.
+        Festival AI audita registros reales de festivales publicitarios. Criterio de jurado estricto.
       </div>
     </div>
   </main>
+
+  <!-- MODAL DE CONFIGURACIÓN -->
+  <div class="modal-overlay" id="modal-settings">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-title">Configuración de API</div>
+        <button class="btn-close" id="btn-close-settings">&times;</button>
+      </div>
+
+      <div class="form-group">
+        <label for="select-provider">Proveedor:</label>
+        <select id="select-provider" class="form-control">
+          <option value="openrouter">OpenRouter (MiniMax M3 / sk-or-...)</option>
+          <option value="gemini">Google Gemini (AIzaSy... o AQ...)</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label for="input-apikey">Tu API Key Personal:</label>
+        <input type="password" id="input-apikey" class="form-control" placeholder="Pega tu clave aquí..." />
+        <div style="font-size: 11.5px; color: var(--text-dim); margin-top: 6px;">
+          Se guarda exclusivamente en tu navegador (localStorage). Si lo dejas vacío, usa la clave del servidor.
+        </div>
+      </div>
+
+      <div class="modal-actions">
+        <button type="button" class="btn-clear" id="btn-clear-settings">Borrar</button>
+        <button type="button" class="btn-save" id="btn-save-settings">Guardar</button>
+      </div>
+    </div>
+  </div>
 
   <script>
     const threadInner = document.getElementById('thread-inner');
@@ -640,20 +655,60 @@
     const btnToggleSidebar = document.getElementById('btn-toggle-sidebar');
     const btnNewChat = document.getElementById('btn-new-chat');
 
-    // Alternar Sidebar
-    btnToggleSidebar.onclick = () => {
-      sidebar.classList.toggle('collapsed');
+    const modalSettings = document.getElementById('modal-settings');
+    const btnOpenSettings = document.getElementById('btn-open-settings');
+    const btnCloseSettings = document.getElementById('btn-close-settings');
+    const btnSaveSettings = document.getElementById('btn-save-settings');
+    const btnClearSettings = document.getElementById('btn-clear-settings');
+    const inputApiKey = document.getElementById('input-apikey');
+    const selectProvider = document.getElementById('select-provider');
+    const labelSettings = document.getElementById('label-settings');
+
+    function syncConfig() {
+      const k = localStorage.getItem('festival_user_key') || '';
+      const p = localStorage.getItem('festival_user_provider') || 'openrouter';
+      inputApiKey.value = k;
+      selectProvider.value = p;
+      labelSettings.innerText = k ? 'Key Activa' : 'Configurar';
+    }
+
+    btnOpenSettings.onclick = () => modalSettings.classList.add('active');
+    btnCloseSettings.onclick = () => modalSettings.classList.remove('active');
+    modalSettings.onclick = (e) => { if (e.target === modalSettings) modalSettings.classList.remove('active'); };
+
+    btnSaveSettings.onclick = () => {
+      const keyVal = inputApiKey.value.trim();
+      const provVal = selectProvider.value;
+      if (keyVal) {
+        localStorage.setItem('festival_user_key', keyVal);
+        localStorage.setItem('festival_user_provider', provVal);
+      } else {
+        localStorage.removeItem('festival_user_key');
+        localStorage.removeItem('festival_user_provider');
+      }
+      syncConfig();
+      modalSettings.classList.remove('active');
     };
 
-    // Nuevo Chat
+    btnClearSettings.onclick = () => {
+      localStorage.removeItem('festival_user_key');
+      localStorage.removeItem('festival_user_provider');
+      inputApiKey.value = '';
+      selectProvider.value = 'openrouter';
+      syncConfig();
+      modalSettings.classList.remove('active');
+    };
+
+    btnToggleSidebar.onclick = () => sidebar.classList.toggle('collapsed');
+
     btnNewChat.onclick = () => {
       threadInner.innerHTML = '';
       if (welcomeScreen) threadInner.appendChild(welcomeScreen);
       queryInput.value = '';
     };
 
-    function lanzarPrompt(texto) {
-      queryInput.value = texto;
+    function lanzarPrompt(txt) {
+      queryInput.value = txt;
       chatForm.dispatchEvent(new Event('submit'));
     }
 
@@ -662,12 +717,10 @@
       const txt = queryInput.value.trim();
       if (!txt) return;
 
-      // Ocultar pantalla de bienvenida
       if (welcomeScreen && welcomeScreen.parentNode) {
         welcomeScreen.remove();
       }
 
-      // 1. Render mensaje de Usuario
       const userRow = document.createElement('div');
       userRow.className = 'message-row user';
       userRow.innerHTML = `
@@ -680,22 +733,26 @@
       btnSend.disabled = true;
       chatThread.scrollTop = chatThread.scrollHeight;
 
-      // 2. Render mensaje de Carga del Bot
       const botRow = document.createElement('div');
       botRow.className = 'message-row bot';
       botRow.innerHTML = `
         <div class="msg-avatar">★</div>
-        <div class="msg-body" id="loading-bot" style="color: var(--gold-300);">
-          Evaluando casos y contrastando boards en la base de datos...
-        </div>
+        <div class="msg-body" style="color: var(--gold-300);">Auditoría en proceso... Evaluando datos oficiales del caso.</div>
       `;
       threadInner.appendChild(botRow);
       chatThread.scrollTop = chatThread.scrollHeight;
 
+      const userKey = localStorage.getItem('festival_user_key') || '';
+      const userProv = localStorage.getItem('festival_user_provider') || 'openrouter';
+
       try {
         const res = await fetch('/api/chat', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 
+            'Content-Type': 'application/json',
+            'x-user-key': userKey,
+            'x-user-provider': userProv
+          },
           body: JSON.stringify({ mensaje: txt })
         });
 
@@ -704,7 +761,7 @@
         try {
           data = JSON.parse(rawText);
         } catch {
-          throw new Error('El servidor excedió el tiempo de respuesta o devolvió un formato inválido.');
+          throw new Error('El servidor tardó más de 15 segundos o devolvió un formato no válido.');
         }
 
         const botBody = botRow.querySelector('.msg-body');
@@ -729,6 +786,8 @@
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;');
     }
+
+    syncConfig();
   </script>
 </body>
 </html>
