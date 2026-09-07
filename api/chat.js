@@ -21,21 +21,34 @@ export default async function handler(req, res) {
     const fileData = readFileSync(filePath, 'utf8');
     const todasLasCampanas = JSON.parse(fileData);
 
-    const promptSistema = `
-Eres un Director Creativo General y jurado experimentado de Cannes Lions.
-Tienes sobre la mesa nuestra base de datos COMPLETA con todas las campañas (ganadoras de metales y no ganadoras/shortlists):
+    // Compresión drástica de tokens manteniendo el 100% del valor conceptual
+    const baseCompacta = todasLasCampanas.map(c => {
+      const metal = c.METAL || c.metal || 'NO GANADORA / SHORTLIST';
+      const festival = `${c.FESTIVAL || c.festival || 'Festival'} ${c.ANIO || c.anio || ''}`.trim();
+      const pieza = c.TITULO_PIEZA || c.titulo_pieza || 'S/T';
+      const marca = c.MARCA || c.marca || 'S/M';
+      const cat = c.CATEGORIA || c.categoria || '';
+      const insight = c.insight_problema || c.insight || '';
+      const idea = c.idea_ejecucion || c.idea || '';
+      const link = c.LINK || c.link || '';
 
-BASE DE DATOS COMPLETA:
-${JSON.stringify(todasLasCampanas)}
+      return `[${metal.toUpperCase()} | ${festival} | ${cat}] "${pieza}" (${marca})\n- Insight: ${insight}\n- Idea: ${idea}${link ? `\n- Link: ${link}` : ''}`;
+    }).join('\n---\n');
+
+    const promptSistema = `
+Eres un Director Creativo General y Jurado Presidente de Cannes Lions.
+Estamos en una sesión de peloteo creativo cara a cara. Tienes acceso a nuestra base COMPLETA con todas las campañas cargadas (ganadoras de metales y no ganadoras/shortlists):
+
+${baseCompacta}
 
 TU MISIÓN EN ESTE PING-PONG CREATIVO:
-1. Analiza y compara patrones reales en los insights, ejecuciones y propuestas entre las que ganaron metales y las que no.
-2. Habla como una dupla creativa: con criterio crítico, apasionado, cero rodeos y lenguaje publicitario auténtico.
-3. Cita nombres específicos de campañas de la base para sustentar tus puntos.
-4. Si el usuario te presenta un reto o brief, dale giros conceptuales y cierra siempre devolviendo la pelota con una pregunta clave.
+1. Analiza y compara patrones reales en los insights, ejecuciones y audacia entre las que ganaron metales frente a las que no pasaron o quedaron en shortlist.
+2. Habla como una dupla creativa: con criterio filoso, apasionado, sin rodeos corporativos y lenguaje de agencia.
+3. Cita nombres específicos de campañas de la base (ganadoras y no ganadoras) para fundamentar tus observaciones.
+4. Si el usuario te tira un brief o pregunta, proponle caminos arriesgados y devuélvele la pelota con una pregunta provocadora para seguir construyendo.
 `;
 
-    // Modelos activos de tu panel ordenados por mayor cuota disponible (500 RPD primero)
+    // Modelos activos de tu cuenta ordenados por cuota
     const modelos = [
       'gemini-3.5-flash-lite',
       'gemini-3.1-flash-lite',
@@ -45,7 +58,7 @@ TU MISIÓN EN ESTE PING-PONG CREATIVO:
     ];
 
     let respuestaTexto = null;
-    let errores = [];
+    let errorDetalle = null;
 
     for (const mod of modelos) {
       try {
@@ -55,7 +68,7 @@ TU MISIÓN EN ESTE PING-PONG CREATIVO:
           contents: [
             {
               role: 'user',
-              parts: [{ text: `${promptSistema}\n\nPregunta del creativo: ${mensaje}` }]
+              parts: [{ text: `${promptSistema}\n\nBrief o pregunta del creativo: ${mensaje}` }]
             }
           ],
           generationConfig: {
@@ -75,16 +88,20 @@ TU MISIÓN EN ESTE PING-PONG CREATIVO:
           respuestaTexto = data.candidates[0].content.parts[0].text;
           break;
         } else {
-          errores.push(`${mod}: ${data.error?.message || response.statusText}`);
+          errorDetalle = data.error?.message || response.statusText;
+          // Si el error es por cuota o rate limit, no spameamos los otros modelos de golpe
+          if (response.status === 429) {
+            break;
+          }
         }
       } catch (err) {
-        errores.push(`${mod}: ${err.message}`);
+        errorDetalle = err.message;
       }
     }
 
     if (!respuestaTexto) {
       return res.status(500).json({ 
-        error: `No se pudo obtener respuesta de ningún modelo. Detalle de intentos:\n${errores.join('\n')}` 
+        error: `Error al procesar: ${errorDetalle}` 
       });
     }
 
