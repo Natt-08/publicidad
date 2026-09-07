@@ -1,4 +1,3 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 
@@ -12,11 +11,10 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'Falta el mensaje en la consulta.' });
   }
 
-  if (!process.env.GEMINI_API_KEY) {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
     return res.status(500).json({ error: 'Falta configurar GEMINI_API_KEY en Vercel.' });
   }
-
-  const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
   try {
     const filePath = join(process.cwd(), 'campanas.json');
@@ -37,41 +35,60 @@ TU MISIÓN EN ESTE PING-PONG CREATIVO:
 4. Si el usuario te presenta un reto o brief, dale giros conceptuales y cierra siempre devolviendo la pelota con una pregunta clave.
 `;
 
-    // Cadena de fallback basada exactamente en tus modelos con cuota disponible (500 RPD primero)
-    const modelosDisponibles = [
+    // Modelos activos de tu panel ordenados por mayor cuota disponible (500 RPD primero)
+    const modelos = [
       'gemini-3.5-flash-lite',
       'gemini-3.1-flash-lite',
-      'gemini-3.8-flash',
-      'gemini-3.7-flash',
       'gemini-3.5-flash',
-      'gemini-2.5-flash-lite',
-      'gemini-2.5-flash'
+      'gemini-3.7-flash',
+      'gemini-3.8-flash'
     ];
 
-    let respuesta = null;
-    let ultimoError = null;
+    let respuestaTexto = null;
+    let errores = [];
 
-    for (const nombreModelo of modelosDisponibles) {
+    for (const mod of modelos) {
       try {
-        const model = genAI.getGenerativeModel({
-          model: nombreModelo,
-          systemInstruction: promptSistema
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${mod}:generateContent?key=${apiKey}`;
+        
+        const payload = {
+          contents: [
+            {
+              role: 'user',
+              parts: [{ text: `${promptSistema}\n\nPregunta del creativo: ${mensaje}` }]
+            }
+          ],
+          generationConfig: {
+            temperature: 0.7
+          }
+        };
+
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
         });
 
-        const result = await model.generateContent(mensaje);
-        respuesta = result.response.text();
-        
-        if (respuesta) break;
+        const data = await response.json();
+
+        if (response.ok && data.candidates?.[0]?.content?.parts?.[0]?.text) {
+          respuestaTexto = data.candidates[0].content.parts[0].text;
+          break;
+        } else {
+          errores.push(`${mod}: ${data.error?.message || response.statusText}`);
+        }
       } catch (err) {
-        ultimoError = err;
+        errores.push(`${mod}: ${err.message}`);
       }
     }
 
-    if (!respuesta) {
-      throw new Error(`Modelos saturados o límite alcanzado. Detalle: ${ultimoError?.message}`);
+    if (!respuestaTexto) {
+      return res.status(500).json({ 
+        error: `No se pudo obtener respuesta de ningún modelo. Detalle de intentos:\n${errores.join('\n')}` 
+      });
     }
 
-    return res.status(200).json({ respuesta });
+    return res.status(200).json({ respuesta: respuestaTexto });
 
   } catch (error) {
     console.error('Error general:', error);
