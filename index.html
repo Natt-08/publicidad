@@ -6,7 +6,6 @@
   <title>Festival AI — Jury Room & Benchmark</title>
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <style>
-    /* VARIABLES Y RESET (Se mantienen iguales) */
     :root {
       --gold-50:  #FFFCEB;
       --gold-100: #FDF5C8;
@@ -30,7 +29,6 @@
     * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
     body { background-color: var(--bg-main); color: var(--text-primary); height: 100vh; display: flex; overflow: hidden; }
     
-    /* ESTRUCTURA */
     aside { width: 260px; background: var(--bg-sidebar); border-right: 1px solid var(--border-subtle); display: flex; flex-direction: column; flex-shrink: 0; transition: margin-left 0.3s ease; z-index: 20; }
     aside.collapsed { margin-left: -260px; }
     .sidebar-header { padding: 14px; }
@@ -53,7 +51,6 @@
     #chat-thread { flex: 1; overflow-y: auto; padding: 24px 16px 120px 16px; display: flex; flex-direction: column; align-items: center; scroll-behavior: smooth; }
     .thread-inner { width: 100%; max-width: 840px; display: flex; flex-direction: column; gap: 24px; }
     
-    /* PANTALLA BIENVENIDA Y CARDS */
     .welcome-screen { text-align: center; margin: 40px auto 20px auto; max-width: 720px; }
     .welcome-title { font-size: 30px; font-weight: 700; color: var(--gold-300); margin-bottom: 8px; }
     .welcome-subtitle { font-size: 14px; color: var(--text-muted); margin-bottom: 36px; }
@@ -63,7 +60,6 @@
     .prompt-card-title { font-size: 13.5px; font-weight: 600; color: var(--gold-200); margin-bottom: 4px; }
     .prompt-card-desc { font-size: 12px; color: var(--text-dim); }
 
-    /* MENSAJES */
     .message-row { display: flex; gap: 16px; width: 100%; line-height: 1.65; }
     .message-row.user { justify-content: flex-end; }
     .msg-avatar { width: 32px; height: 32px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: bold; flex-shrink: 0; }
@@ -73,7 +69,6 @@
     .message-row.user .msg-body { background: var(--user-bubble); padding: 12px 18px; border-radius: 14px; border-top-right-radius: 2px; border: 1px solid var(--border-subtle); order: 1; }
     .message-row.bot .msg-body { background: transparent; padding: 4px 0; order: 2; width: 100%; }
 
-    /* MARKDOWN */
     .msg-body h1, .msg-body h2, .msg-body h3 { color: var(--gold-300); margin: 18px 0 10px 0; font-weight: 700; }
     .msg-body h1 { font-size: 20px; border-bottom: 1px solid var(--border-subtle); padding-bottom: 6px; }
     .msg-body p { margin-bottom: 12px; }
@@ -86,7 +81,6 @@
     .msg-body th { background: #15161e; color: var(--gold-400); font-weight: 600; border-bottom: 2px solid var(--gold-600); }
     .msg-body tr:nth-child(even) { background: rgba(255, 255, 255, 0.02); }
 
-    /* INPUT */
     .input-container { position: absolute; bottom: 0; left: 0; right: 0; padding: 0 20px 24px 20px; background: linear-gradient(180deg, transparent 0%, var(--bg-main) 35%); display: flex; flex-direction: column; align-items: center; }
     .input-box-wrapper { width: 100%; max-width: 840px; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 14px; padding: 6px 12px 6px 16px; display: flex; align-items: center; gap: 10px; }
     .input-box-wrapper:focus-within { border-color: var(--gold-500); }
@@ -95,7 +89,6 @@
     .btn-send:disabled { opacity: 0.5; cursor: not-allowed; }
     .disclaimer { font-size: 11.5px; color: var(--text-dim); margin-top: 8px; }
 
-    /* MODAL */
     .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.75); display: none; justify-content: center; align-items: center; z-index: 100; }
     .modal-overlay.active { display: flex; }
     .modal-card { background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 14px; width: 100%; max-width: 400px; padding: 24px; }
@@ -105,32 +98,27 @@
 </head>
 <body>
 
-  <!-- SIDEBAR -->
   <aside id="sidebar">
     <div class="sidebar-header">
       <button class="btn-new-chat" id="btn-new-chat"><span>+</span> Nueva sesión</button>
     </div>
-    <!-- Contenedor dinámico de sesiones guardadas -->
     <div class="chat-history" id="sidebar-history"></div>
     <div class="sidebar-footer">
       <div class="user-badge"><div class="user-avatar">J</div><span id="label-user">Jurado AI</span></div>
     </div>
   </aside>
 
-  <!-- MAIN -->
   <main>
     <div class="top-bar">
       <div class="top-bar-left">
         <button class="btn-toggle-sidebar" id="btn-toggle-sidebar">☰</button>
         <div style="font-size: 13px; font-weight: 600; color: var(--gold-200);">Festival AI Engine</div>
       </div>
-      <button class="btn-settings" id="btn-open-settings">⚙️ Config</button>
+      <button class="btn-settings" id="btn-open-settings">⚙️ Routing</button>
     </div>
 
     <div id="chat-thread">
-      <div class="thread-inner" id="thread-inner">
-        <!-- El welcome screen se inicializa vía JS -->
-      </div>
+      <div class="thread-inner" id="thread-inner"></div>
     </div>
 
     <div class="input-container">
@@ -138,24 +126,27 @@
         <input type="text" id="query-input" placeholder="Escribe tu consulta estratégica..." autocomplete="off" required />
         <button type="submit" class="btn-send" id="btn-send">↑</button>
       </form>
-      <div class="disclaimer">Sesión activa. Historial guardado localmente (Máx 5).</div>
+      <div class="disclaimer">Memoria persistente: Guarda hasta 5 sesiones locales.</div>
     </div>
   </main>
 
-  <!-- MODAL -->
+  <!-- MODAL SOLO DE ESTRATEGIA -->
   <div class="modal-overlay" id="modal-settings">
     <div class="modal-card">
       <div style="display:flex; justify-content:space-between; margin-bottom:16px;">
-        <h3 style="color:var(--gold-200);">Ajustes</h3>
+        <h3 style="color:var(--gold-200);">Estrategia de Motor</h3>
         <button id="btn-close-settings" style="background:none; border:none; color:#fff; cursor:pointer;">&times;</button>
       </div>
-      <label>Proveedor API:</label>
-      <select id="select-provider" class="form-control">
-        <option value="openrouter">OpenRouter (MiniMax M3)</option>
-        <option value="gemini">Google Gemini</option>
+      <p style="font-size: 12.5px; color: var(--text-dim); margin-bottom: 16px;">
+        Las API Keys están seguras en el servidor (Vercel). Solo elige qué motor de IA prefieres usar.
+      </p>
+      <label style="font-size: 12.5px; font-weight: 600; color: var(--text-muted);">Ruteo de IA:</label>
+      <select id="select-strategy" class="form-control">
+        <option value="auto">🌟 Auto-Cascada (Gemini → Groq → OpenRouter)</option>
+        <option value="gemini">Forzar Google Gemini</option>
+        <option value="groq">Forzar Groq (Llama 3)</option>
+        <option value="openrouter">Forzar OpenRouter (Llama Free)</option>
       </select>
-      <label>API Key:</label>
-      <input type="password" id="input-apikey" class="form-control" placeholder="sk-or-... / AIzaSy..." />
       <div style="text-align:right;">
         <button type="button" class="btn-save" id="btn-save-settings">Guardar</button>
       </div>
@@ -163,9 +154,6 @@
   </div>
 
   <script>
-    /* =========================================================
-       SISTEMA MULTI-SESIÓN CON LOCALSTORAGE (MÁX 5 CHATS)
-       ========================================================= */
     let currentChatId = null;
     let chatHistory = []; 
 
@@ -174,10 +162,7 @@
     }
 
     function saveChatsToLocal(chats) {
-      // Retenemos solo las últimas 5 conversaciones
-      if (chats.length > 5) {
-        chats = chats.slice(chats.length - 5);
-      }
+      if (chats.length > 5) chats = chats.slice(chats.length - 5);
       localStorage.setItem('festival_sessions', JSON.stringify(chats));
       renderSidebar(chats);
     }
@@ -185,8 +170,6 @@
     function renderSidebar(chats) {
       const sidebarContainer = document.getElementById('sidebar-history');
       sidebarContainer.innerHTML = '';
-      
-      // Mostrar más reciente arriba
       [...chats].reverse().forEach(chat => {
         const div = document.createElement('div');
         div.className = `history-item ${chat.id === currentChatId ? 'active' : ''}`;
@@ -221,11 +204,9 @@
         thread.innerHTML = renderWelcomeScreen();
         return;
       }
-      
       chatHistory.forEach(msg => {
         const row = document.createElement('div');
         row.className = `message-row ${msg.role === 'user' ? 'user' : 'bot'}`;
-        
         if (msg.role === 'user') {
           row.innerHTML = `<div class="msg-avatar">TÚ</div><div class="msg-body">${escapeHtml(msg.content)}</div>`;
         } else {
@@ -240,15 +221,12 @@
       const chats = getSavedChats();
       const chat = chats.find(c => c.id === id);
       if(!chat) return;
-
       currentChatId = chat.id;
       chatHistory = chat.messages || [];
-      
       renderSidebar(chats);
       renderMessages();
     }
 
-    // Inicializar nueva sesión
     document.getElementById('btn-new-chat').onclick = () => {
       currentChatId = null;
       chatHistory = [];
@@ -261,9 +239,6 @@
       document.getElementById('chat-form').dispatchEvent(new Event('submit'));
     }
 
-    /* =========================================================
-       LÓGICA DE COMUNICACIÓN (API)
-       ========================================================= */
     const chatForm = document.getElementById('chat-form');
     const queryInput = document.getElementById('query-input');
     const btnSend = document.getElementById('btn-send');
@@ -274,7 +249,6 @@
       const txt = queryInput.value.trim();
       if (!txt) return;
 
-      // 1. Si es mensaje nuevo, creamos ID y guardamos título
       const isFirstMessage = !currentChatId;
       if (isFirstMessage) {
         currentChatId = Date.now().toString();
@@ -284,88 +258,70 @@
         saveChatsToLocal(chats);
       }
 
-      // 2. Renderizar pregunta del usuario
       chatHistory.push({ role: 'user', content: txt });
       renderMessages();
       queryInput.value = '';
       btnSend.disabled = true;
 
-      // Mostrar cargando
       const botRow = document.createElement('div');
       botRow.className = 'message-row bot';
-      botRow.innerHTML = `<div class="msg-avatar">★</div><div class="msg-body" style="color: var(--gold-300);">Auditoría en proceso...</div>`;
+      botRow.innerHTML = `<div class="msg-avatar">★</div><div class="msg-body" style="color: var(--gold-300);">Analizando base de datos...</div>`;
       threadInner.appendChild(botRow);
       document.getElementById('chat-thread').scrollTop = document.getElementById('chat-thread').scrollHeight;
-
-      // 3. Fetch al servidor
-      const userKey = localStorage.getItem('festival_user_key') || '';
-      const userProv = localStorage.getItem('festival_user_provider') || 'openrouter';
 
       try {
         const res = await fetch('/api/chat', {
           method: 'POST',
           headers: { 
             'Content-Type': 'application/json',
-            'x-user-key': userKey,
-            'x-user-provider': userProv
+            'x-strategy': localStorage.getItem('festival_strategy') || 'auto'
           },
           body: JSON.stringify({ 
             mensaje: txt,
-            historial: chatHistory.slice(0, -1) // Enviamos la memoria (excepto la pregunta actual)
+            historial: chatHistory.slice(0, -1)
           })
         });
 
         const rawText = await res.text();
         let data;
-        try { data = JSON.parse(rawText); } 
-        catch { throw new Error('Error del servidor o timeout.'); }
+        try { data = JSON.parse(rawText); } catch { throw new Error('Timeout o formato no válido del servidor.'); }
 
-        if (!res.ok) {
-          throw new Error(data.error || 'Fallo en la consulta.');
-        }
+        if (!res.ok) throw new Error(data.error || 'Fallo en la consulta.');
 
-        // 4. Guardar respuesta de la IA
         chatHistory.push({ role: 'assistant', content: data.respuesta });
         renderMessages();
 
-        // 5. Actualizar LocalStorage con la nueva conversación completa
         const chats = getSavedChats();
         const chatIndex = chats.findIndex(c => c.id === currentChatId);
         if (chatIndex !== -1) {
           chats[chatIndex].messages = chatHistory;
           saveChatsToLocal(chats);
         }
-
       } catch (err) {
         botRow.querySelector('.msg-body').innerHTML = `<span style="color: #ef4444;">Error: ${err.message}</span>`;
       }
-
       btnSend.disabled = false;
     };
 
-    /* =========================================================
-       UTILIDADES & CONFIGURACIÓN UI
-       ========================================================= */
     function escapeHtml(str) {
       return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     }
 
     const modalSettings = document.getElementById('modal-settings');
-    document.getElementById('btn-open-settings').onclick = () => modalSettings.classList.add('active');
+    document.getElementById('btn-open-settings').onclick = () => {
+      document.getElementById('select-strategy').value = localStorage.getItem('festival_strategy') || 'auto';
+      modalSettings.classList.add('active');
+    };
     document.getElementById('btn-close-settings').onclick = () => modalSettings.classList.remove('active');
     
     document.getElementById('btn-save-settings').onclick = () => {
-      localStorage.setItem('festival_user_key', document.getElementById('input-apikey').value.trim());
-      localStorage.setItem('festival_user_provider', document.getElementById('select-provider').value);
+      localStorage.setItem('festival_strategy', document.getElementById('select-strategy').value);
       modalSettings.classList.remove('active');
     };
 
     document.getElementById('btn-toggle-sidebar').onclick = () => document.getElementById('sidebar').classList.toggle('collapsed');
 
-    // Inicialización al cargar la página
     window.onload = () => {
-      document.getElementById('input-apikey').value = localStorage.getItem('festival_user_key') || '';
-      document.getElementById('select-provider').value = localStorage.getItem('festival_user_provider') || 'openrouter';
       renderSidebar(getSavedChats());
       renderMessages();
     };
