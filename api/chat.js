@@ -1,28 +1,36 @@
 import { Groq } from 'groq-sdk';
-import fs from 'fs';
-import path from 'path';
-
-const groq = new Groq({
-  apiKey: process.env.GROQ_API_KEY
-});
+import { readFileSync } from 'fs';
+import { join } from 'path';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Método no permitido' });
   }
 
-  const { mensaje } = req.body;
+  const { mensaje } = req.body || {};
   if (!mensaje) {
-    return res.status(400).json({ error: 'Falta el mensaje' });
+    return res.status(400).json({ error: 'Falta el mensaje en la consulta.' });
   }
 
-  try {
-    // 1. Cargar el JSON con las campañas
-    const filePath = path.join(process.cwd(), 'campanas.json');
-    const fileData = fs.readFileSync(filePath, 'utf8');
-    const campanas = JSON.parse(fileData);
+  // Verificación preventiva de la clave
+  if (!process.env.GROQ_API_KEY) {
+    return res.status(500).json({ error: 'Falta configurar GROQ_API_KEY en las Environment Variables de Vercel.' });
+  }
 
-    // 2. Reducir campos para evitar exceder límites de tokens
+  const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+
+  try {
+    // Lectura del JSON en la raíz del entorno Vercel
+    const filePath = join(process.cwd(), 'campanas.json');
+    let campanas = [];
+    try {
+      const fileData = readFileSync(filePath, 'utf8');
+      campanas = JSON.parse(fileData);
+    } catch (err) {
+      return res.status(500).json({ error: `No se pudo leer campanas.json: ${err.message}` });
+    }
+
+    // Filtrar/compactar para cuidar la ventana de tokens
     const datosCompactos = campanas.map(c => ({
       pieza: c.TITULO_PIEZA || c.titulo_pieza || '',
       marca: c.MARCA || c.marca || '',
@@ -34,41 +42,38 @@ export default async function handler(req, res) {
     }));
 
     const promptSistema = `
-Eres un estratega y director creativo publicitario experto en festivales.
-Tienes acceso a esta base de campañas ganadoras:
+Eres un estratega y director creativo senior experto en festivales publicitarios.
+Tienes acceso a esta base de campañas premiadas:
 ${JSON.stringify(datosCompactos)}
 
 INSTRUCCIONES:
-1. Responde a la pregunta del usuario con visión estratégica e inspiración.
-2. Cita obligatoriamente casos específicos de la base provista que resuelvan la duda.
-3. Para cada caso incluye: Nombre de la pieza, Marca, Festival/Año/Metal, insight, idea y su LINK.
+1. Responde a la pregunta del usuario con profundidad analítica e inspiración publicitaria.
+2. Cita OBLIGATORIAMENTE ejemplos concretos de la base suministrada que justifiquen tu respuesta.
+3. Para cada caso mencionado incluye: Nombre de la pieza, Marca, Festival/Año/Metal, insight, idea y su LINK.
+4. Mantén un tono creativo, directo y profesional.
 `;
 
-    // 3. Llamada idéntica a tu fragmento oficial
     const chatCompletion = await groq.chat.completions.create({
       messages: [
         { role: 'system', content: promptSistema },
         { role: 'user', content: mensaje }
       ],
-      model: "openai/gpt-oss-120b",
-      temperature: 1,
+      model: 'openai/gpt-oss-120b',
+      temperature: 0.7,
       max_completion_tokens: 2048,
-      top_p: 1,
       stream: true,
-      reasoning_effort: "medium",
-      stop: null
+      reasoning_effort: 'medium'
     });
 
-    // 4. Juntar los pedazos (chunks) del stream antes de responder
     let respuestaFinal = '';
     for await (const chunk of chatCompletion) {
       respuestaFinal += chunk.choices[0]?.delta?.content || '';
     }
 
-    return res.status(200).json({ respuesta: respuestaFinal || 'Sin respuesta generada.' });
+    return res.status(200).json({ respuesta: respuestaFinal || 'El modelo no devolvió texto.' });
 
   } catch (error) {
     console.error('Error detallado:', error);
-    return res.status(500).json({ error: error.message || 'Error interno del servidor' });
+    return res.status(500).json({ error: error.message || 'Error desconocido en el servidor.' });
   }
 }
