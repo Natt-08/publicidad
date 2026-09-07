@@ -5,6 +5,14 @@ export const config = {
   maxDuration: 60
 };
 
+function normalizar(texto) {
+  return String(texto || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Método no permitido' });
@@ -32,41 +40,37 @@ export default async function handler(req, res) {
     const fileData = readFileSync(filePath, 'utf8');
     const todasLasCampanas = JSON.parse(fileData);
 
-    const query = String(mensaje || '').toLowerCase();
+    const queryNorm = normalizar(mensaje);
 
-    // Palabras reservadas del sistema que NO deben coincidir como nombres de campaña
-    const palabrasIgnoradasTitulo = new Set([
-      'base', 'campaña', 'campana', 'festival', 'cannes', 'eurobest', 'dubai', 'lynx',
-      'ideas', 'piezas', 'casos', 'versus', 'detalle', 'analisis', 'tabla', 'todas', 'links', 'link'
+    const palabrasProhibidas = new Set([
+      'no', 'sin', 'con', 'base', 'campana', 'festival', 'cannes', 'eurobest', 'dubai', 'lynx',
+      'ideas', 'piezas', 'casos', 'versus', 'detalle', 'analisis', 'tabla', 'todas', 'links', 
+      'link', 'seguro', 'nada', 'existe', 'alguna', 'sobre', 'dame'
     ]);
 
-    // 1. DETECCIÓN DE CASO ESPECÍFICO
     const coincidenciaEspecifica = todasLasCampanas.find(c => {
-      const tit = String(c.Title || c.TITULO_PIEZA || '').toLowerCase().trim();
-      if (tit.length < 4 || palabrasIgnoradasTitulo.has(tit)) return false;
-      return query.includes(tit);
+      const tit = limpiarTexto(c.Title || c.TITULO_PIEZA);
+      if (tit.length < 5 || palabrasProhibidas.has(tit)) return false;
+      return queryNorm.includes(tit);
     });
 
     let promptSistema = '';
-
     const reglasMetalesYLinks = `
 REGLAS METODOLÓGICAS:
 - "Grand Prix", "Gold", "Silver", "Bronze": Ganadoras en el podio.
-- "Shortlist": Pieza que superó el primer corte del jurado pero no obtuvo metal.
-- "NO GANO": SIGNIFICA RECHAZADA / ELIMINADA. La pieza no entró a Shortlist en esa categoría. Prohibido decir que quedó en shortlist si tiene "(NO GANO)".
-- ENLACES Y RECURSOS: Cada caso incluye su enlace oficial ("LINK_BOARD"). Si el usuario solicita enlaces, links, imágenes o referencias visuales, ES OBLIGATORIO incluir el enlace correspondiente en formato Markdown: [Ver Board Oficial](URL). No digas que no tienes links si vienen provistos en los datos.
+- "Shortlist": Superó el primer corte pero no obtuvo metal.
+- "NO GANO": RECHAZADA / ELIMINADA. No entró a Shortlist. Prohibido decir que quedó en shortlist.
+- ENLACES: Si el usuario pide links, imágenes o boards, entrégalos en formato Markdown: [Ver Board Oficial](URL).
 `;
 
     if (coincidenciaEspecifica) {
-      // MODO CASO PUNTUAL (Board completo + Enlaces)
       const c = coincidenciaEspecifica;
       const linkBoard = c['Board image'] || c.URL || c.LINK || c.board_image || 'No disponible';
-      
-      promptSistema = `
-Eres un jurado implacable y analista senior de festivales como Cannes Lions.
-Tienes sobre la mesa la ficha oficial y completa del caso consultado:
 
-DATOS OFICIALES DEL CASO (BÁSATE 100% EN ESTO, PROHIBIDO INVENTAR):
+      promptSistema = `
+Eres un jurado implacable de Cannes Lions analizando este caso específico:
+
+DATOS OFICIALES:
 - Título: ${c.Title || c.TITULO_PIEZA}
 - Marca: ${c.MARCA}
 - Festival y Año: ${c.FESTIVAL || 'CANNES'} ${c.AÑO || c.ANIO || ''}
@@ -80,52 +84,43 @@ ${c['ANALISIS BOARD'] || 'Sin información detallada de board.'}
 ${reglasMetalesYLinks}
 
 INSTRUCCIONES:
-1. No inventes ejecuciones que no figuren en este board.
-2. Desglosa tensión, mecánica real y veredicto de jurado de forma directa.
-3. Si el usuario pide el enlace o imagen del board, entrégalo explícitamente: [Ver Board Oficial](${linkBoard}).
+1. Sé fiel al board provisto.
+2. Si el usuario pide el enlace, muestra: [Ver Board Oficial](${linkBoard}).
 `;
 
     } else {
-      // MODO BENCHMARK Y BÚSQUEDA GENERAL
-      const aniosDetectados = query.match(/\b(20\d{2})\b/g) || [];
-      const festivales = ['cannes', 'el ojo', 'clio', 'd&ad', 'eurobest', 'dubai lynx'].filter(f => query.includes(f));
-      const categorias = ['outdoor', 'film', 'direct', 'print', 'pr', 'purpose', 'brand purpose', 'activation', 'media', 'data', 'gaming', 'health'].filter(c => query.includes(c));
-
-      const palabrasIgnoradas = new Set(['para', 'como', 'este', 'esta', 'campañas', 'versus', 'piezas', 'ganaron', 'hacer', 'unas', 'unos', 'sobre', 'entre', 'base', 'datos', 'links', 'dame']);
-      const keywords = query
-        .replace(/[^\wáéíóúñ\s]/gi, '')
-        .split(/\s+/)
-        .filter(w => w.length > 3 && !palabrasIgnoradas.has(w));
+      const terminosRelevantes = [];
+      if (queryNorm.includes('termograf') || queryNorm.includes('calor') || queryNorm.includes('infrarroj')) {
+        terminosRelevantes.push('termograf', 'termic', 'thermal', 'infrarroj', 'infrared', 'untouchables', 'eva');
+      }
+      if (queryNorm.includes('cancer') || queryNorm.includes('mama') || queryNorm.includes('salud')) {
+        terminosRelevantes.push('cancer', 'breast', 'eva clinic', 'untouchables', 'tumor');
+      }
 
       const calificadas = todasLasCampanas.map(c => {
         let score = 0;
-        const metales = String(c.METAL_SUMMARY || c.METAL || '').toLowerCase();
-        const titulo = String(c.Title || c.TITULO_PIEZA || '').toLowerCase();
-        const marca = String(c.MARCA || '').toLowerCase();
-        const cat = String(c.CATEGORIA_SUMMARY || c.CATEGORIA || '').toLowerCase();
-        const fest = String(c.FESTIVAL || '').toLowerCase();
-        const anio = String(c.AÑO || c.ANIO || '');
-        const board = String(c['ANALISIS BOARD'] || '').toLowerCase();
+        const metales = normalizar(c.METAL_SUMMARY || c.METAL);
+        const titulo = normalizar(c.Title || c.TITULO_PIEZA);
+        const marca = normalizar(c.MARCA);
+        const cat = normalizar(c.CATEGORIA_SUMMARY || c.CATEGORIA);
+        const board = normalizar(c['ANALISIS BOARD']);
 
-        if (metales.includes('grand prix')) score += 30;
-        else if (metales.includes('gold')) score += 18;
-        else if (metales.includes('silver')) score += 8;
-
-        if (query.includes('rechazadas') || query.includes('no ganaron') || query.includes('no gano')) {
-          if (metales.includes('no gano') && !metales.includes('grand prix') && !metales.includes('gold')) {
-            score += 40;
-          }
-        }
-
-        if (aniosDetectados.length > 0 && aniosDetectados.includes(anio)) score += 35;
-        festivales.forEach(f => { if (fest.includes(f)) score += 20; });
-        categorias.forEach(catItem => { if (cat.includes(catItem)) score += 25; });
-        
-        keywords.forEach(kw => {
-          if (titulo.includes(kw)) score += 30;
-          if (marca.includes(kw)) score += 25;
-          if (board.includes(kw)) score += 18;
+        terminosRelevantes.forEach(t => {
+          if (titulo.includes(t)) score += 150;
+          if (board.includes(t)) score += 120;
+          if (marca.includes(t)) score += 80;
         });
+
+        const tokens = queryNorm.split(/\s+/).filter(w => w.length > 3 && !palabrasProhibidas.has(w));
+        tokens.forEach(tk => {
+          if (titulo.includes(tk)) score += 40;
+          if (marca.includes(tk)) score += 30;
+          if (board.includes(tk)) score += 20;
+        });
+
+        if (metales.includes('grand prix')) score += 15;
+        else if (metales.includes('gold')) score += 10;
+        else if (metales.includes('silver')) score += 5;
 
         return { ...c, _score: score };
       });
@@ -141,37 +136,38 @@ INSTRUCCIONES:
         const linkBoard = c['Board image'] || c.URL || c.LINK || c.board_image || 'No disponible';
         
         let board = String(c['ANALISIS BOARD'] || '').replace(/\s+/g, ' ').trim();
-        if (board.length > 250) board = board.substring(0, 250) + '...';
+        if (board.length > 260) board = board.substring(0, 260) + '...';
 
-        return `${i + 1}. "${titulo}" (${marca} - ${fest}) | LINK_BOARD: ${linkBoard} | RESULTADOS: ${metales} | BOARD: ${board}`;
+        return `${i + 1}. "${titulo}" (${marca} - ${fest}) | LINK: ${linkBoard} | RESULTADOS: ${metales} | BOARD: ${board}`;
       }).join('\n\n');
 
       promptSistema = `
-Eres un jurado estricto de Cannes Lions.
-Tienes sobre la mesa esta selección de casos extraídos de la base de datos:
+Eres un jurado estricto y analista senior de Cannes Lions.
+Tienes sobre la mesa estos casos extraídos de la base de datos:
 
 ${baseSintetizada}
 
 ${reglasMetalesYLinks}
 
-PAUTAS DE RESPUESTA:
-1. Responde de forma analítica, directa y profesional.
-2. Si te piden un versus, presenta la síntesis en una Tabla Markdown.
-3. Si el usuario pide enlaces o links de los casos citados, facilítalos con su nombre en Markdown: [Ver Board Oficial](URL). Si el enlace dice 'No disponible', dilo transparentemente.
-4. Si una campaña no figura en los datos, aclara que no está en el registro. Prohibido inventar URLs o casos.
+PAUTAS:
+1. Revisa minuciosamente los boards provistos (incluyendo menciones en inglés o tecnología aplicada).
+2. Si un caso coincide con el tema, cítalo con sus metales reales.
+3. Si solicitan links, entrégalos siempre en Markdown: [Ver Board Oficial](URL).
 `;
     }
 
-    const mensajesParaLLM = [
-      { role: 'system', content: promptSistema },
-      ...historial.slice(-4),
-      { role: 'user', content: mensaje }
-    ];
-
+    // AHORA RECUERDA HASTA 30 MENSAJES DE HISTORIAL
+    const historialLargo = historial.slice(-30);
     let respuestaTexto = null;
     const esOpenRouter = apiKey.startsWith('sk-or-') || headerProvider === 'openrouter';
 
     if (esOpenRouter) {
+      const mensajesParaLLM = [
+        { role: 'system', content: promptSistema },
+        ...historialLargo,
+        { role: 'user', content: mensaje }
+      ];
+
       const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST',
         headers: {
@@ -185,7 +181,7 @@ PAUTAS DE RESPUESTA:
           messages: mensajesParaLLM,
           temperature: 0.35,
           presence_penalty: 0.4,
-          max_tokens: 2200
+          max_tokens: 2000
         })
       });
 
@@ -194,28 +190,35 @@ PAUTAS DE RESPUESTA:
       respuestaTexto = data.choices?.[0]?.message?.content;
 
     } else {
-      const urlGemini = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
-      const payloadGemini = {
+      // Traducción de historial para Gemini
+      const historialGemini = historialLargo.map(msg => ({
+        role: msg.role === 'assistant' ? 'model' : 'user',
+        parts: [{ text: msg.content }]
+      }));
+
+      const payload = {
         contents: [
-          { role: 'user', parts: [{ text: `${promptSistema}\n\nConsulta del usuario: ${mensaje}` }] }
+          ...historialGemini,
+          { role: 'user', parts: [{ text: `${promptSistema}\n\nConsulta actual: ${mensaje}` }] }
         ],
-        generationConfig: { temperature: 0.2, maxOutputTokens: 2200 }
+        generationConfig: { temperature: 0.2, maxOutputTokens: 2000 }
       };
 
+      const urlGemini = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
       const resp = await fetch(urlGemini, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payloadGemini)
+        body: JSON.stringify(payload)
       });
-
       const data = await resp.json();
+      
       if (!resp.ok) {
         if (data.error?.message && data.error.message.includes('gemini-3.6-flash')) {
           const url36 = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`;
           const resp36 = await fetch(url36, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payloadGemini)
+            body: JSON.stringify(payload)
           });
           const data36 = await resp36.json();
           if (!resp36.ok) return res.status(500).json({ error: `Error Gemini: ${data36.error?.message}` });
@@ -228,14 +231,19 @@ PAUTAS DE RESPUESTA:
       }
     }
 
-    if (!respuestaTexto) {
-      return res.status(500).json({ error: 'El proveedor devolvió una respuesta vacía.' });
-    }
-
     return res.status(200).json({ respuesta: respuestaTexto });
 
   } catch (error) {
     console.error('Error general:', error);
     return res.status(500).json({ error: error.message || 'Error interno del servidor' });
   }
+}
+
+// Función auxiliar
+function limpiarTexto(str) {
+  return String(str || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
 }
