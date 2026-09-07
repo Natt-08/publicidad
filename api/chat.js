@@ -15,9 +15,10 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'Falta el mensaje en la consulta.' });
   }
 
-  // 1. Detección de la clave (Header del usuario o variables de Vercel)
   const headerKey = req.headers['x-user-key'];
   const userKey = (typeof headerKey === 'string' && headerKey.trim().length > 0) ? headerKey.trim() : null;
+  const headerProvider = req.headers['x-user-provider'];
+
   const apiKey = userKey || process.env.GEMINI_API_KEY || process.env.OPENROUTER_API_KEY;
 
   if (!apiKey) {
@@ -33,7 +34,7 @@ export default async function handler(req, res) {
 
     const query = String(mensaje || '').toLowerCase();
 
-    // 2. Filtros y scoring en memoria
+    // Filtros
     const aniosDetectados = query.match(/\b(20\d{2})\b/g) || [];
     const festivales = ['cannes', 'el ojo', 'clio', 'd&ad', 'eurobest', 'dubai lynx'].filter(f => query.includes(f));
     const categorias = ['outdoor', 'film', 'direct', 'print', 'pr', 'design', 'activation', 'purpose', 'media', 'creative data'].filter(c => query.includes(c));
@@ -99,35 +100,35 @@ export default async function handler(req, res) {
     }).join('\n');
 
     const promptSistema = `
-Eres un analista estratégico y jurado experto de festivales publicitarios (Cannes Lions).
-Tienes sobre la mesa una selección optimizada de campañas relevantes de nuestra base de datos:
+Eres un analista estratégico y jurado experto de Cannes Lions.
+Tienes sobre la mesa una selección optimizada de campañas relevantes:
 
 SELECCIÓN DE CASOS:
 ${baseSintetizada}
 
-INSTRUCCIONES CLAVE:
-1. Responde de forma analítica, directa y profesional. Cero teatralidad o acotaciones entre paréntesis.
-2. Si piden un versus o comparativa:
+PAUTAS DE RESPUESTA:
+1. Responde de forma directa, analítica y sin roleplay ni acotaciones teatrales.
+2. Si piden un versus:
    - Contrasta ganadoras (Grand Prix / Gold) frente a Shortlists / No ganadoras.
    - Organiza el análisis principal en una **Tabla Markdown** (Columnas: Caso & Marca | Metal | Tensión / Insight | Brecha Estratégica).
-   - Analiza qué hizo que una cruzara la línea (tensión real, producto integrado) frente a la no ganadora.
-3. Cita obligatoriamente los nombres y marcas exactas de la lista provista.
-4. Concluye con una pregunta estratégica orientada a desafiar el brief o reto.
+   - Analiza qué hizo que una ganara (fricción real, utilidad o producto integrado) frente a la superficialidad de la no ganadora.
+3. Cita nombres exactos de piezas y marcas.
+4. Concluye con una pregunta estratégica orientada al reto planteado.
 `;
 
     let respuestaTexto = null;
 
-    // 3. ENRUTAMIENTO AUTOMÁTICO SEGÚN LA LLAVE
-    const esGemini = apiKey.startsWith('AIzaSy');
+    // DETECCIÓN: Es Gemini si lo indica el header O si empieza con AIzaSy o AQ
+    const esGemini = headerProvider === 'gemini' || apiKey.startsWith('AIzaSy') || apiKey.startsWith('AQ');
 
     if (esGemini) {
-      // LLAMADA NATIVA A GOOGLE GEMINI
+      // LLAMADA DIRECTA A GEMINI
       const urlGemini = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
       const payloadGemini = {
         contents: [
           {
             role: 'user',
-            parts: [{ text: `${promptSistema}\n\nConsulta del usuario: ${mensaje}` }]
+            parts: [{ text: `${promptSistema}\n\nConsulta: ${mensaje}` }]
           }
         ],
         generationConfig: {
@@ -150,7 +151,7 @@ INSTRUCCIONES CLAVE:
       respuestaTexto = data.candidates?.[0]?.content?.parts?.[0]?.text;
 
     } else {
-      // LLAMADA A OPENROUTER (MiniMax u otros)
+      // LLAMADA A OPENROUTER
       const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST',
         headers: {
@@ -179,7 +180,7 @@ INSTRUCCIONES CLAVE:
     }
 
     if (!respuestaTexto) {
-      return res.status(500).json({ error: 'El proveedor devolvió una respuesta vacía. Por favor reintenta.' });
+      return res.status(500).json({ error: 'Respuesta vacía del proveedor. Reintenta la consulta.' });
     }
 
     return res.status(200).json({ respuesta: respuestaTexto });
