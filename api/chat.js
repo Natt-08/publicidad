@@ -15,14 +15,14 @@ export default async function handler(req, res) {
   const { mensaje, historial = [] } = req.body || {};
   if (!mensaje) return res.status(400).json({ error: 'Falta el mensaje.' });
 
-  // Recibimos las 3 llaves y la estrategia desde el frontend
-  const keyGemini = req.headers['x-gemini-key'] || process.env.GEMINI_API_KEY;
-  const keyGroq = req.headers['x-groq-key'] || process.env.GROQ_API_KEY;
-  const keyOpenRouter = req.headers['x-openrouter-key'] || process.env.OPENROUTER_API_KEY;
-  const estrategia = req.headers['x-strategy'] || 'auto'; // 'auto', 'gemini', 'groq', 'openrouter'
+  // 1. LLAVES DESDE VERCEL (Seguridad total, sin depender del frontend)
+  const keyGemini = process.env.GEMINI_API_KEY;
+  const keyGroq = process.env.GROQ_API_KEY;
+  const keyOpenRouter = process.env.OPENROUTER_API_KEY;
+  const estrategia = req.headers['x-strategy'] || 'auto'; 
 
   if (!keyGemini && !keyGroq && !keyOpenRouter) {
-    return res.status(400).json({ error: 'Configura al menos una API Key en los ajustes (⚙️).' });
+    return res.status(500).json({ error: 'Faltan las variables de entorno (API Keys) en Vercel.' });
   }
 
   try {
@@ -30,19 +30,20 @@ export default async function handler(req, res) {
     const todasLasCampanas = JSON.parse(readFileSync(filePath, 'utf8'));
     const queryNorm = normalizar(mensaje);
 
-    // 1. DICCIONARIO DE BÚSQUEDA SEMÁNTICA
+    // 2. EXPANSIÓN SEMÁNTICA (Anti-Ceguera)
     const terminosRelevantes = [];
     if (queryNorm.includes('termograf') || queryNorm.includes('calor') || queryNorm.includes('infrarroj')) terminosRelevantes.push('termograf', 'termic', 'thermal', 'infrarroj', 'infrared', 'eva clinic', 'untouchables');
     if (queryNorm.includes('cancer') || queryNorm.includes('mama') || queryNorm.includes('tumor')) terminosRelevantes.push('cancer', 'breast', 'oncolog', 'untouchables');
     if (queryNorm.includes('gaming') || queryNorm.includes('videojuego') || queryNorm.includes('esports')) terminosRelevantes.push('gaming', 'videojuego', 'esports', 'twitch', 'gamer', 'stevenage', 'fortnite');
     if (queryNorm.includes('halloween') || queryNorm.includes('terror') || queryNorm.includes('miedo')) terminosRelevantes.push('halloween', 'terror', 'miedo', 'horror', 'thriller');
 
-    // 2. KEYWORDS Y SCORING
+    // 3. KEYWORDS Y EXCLUSIONES
     const palabrasProhibidas = new Set(['para', 'como', 'este', 'esta', 'campanas', 'versus', 'piezas', 'ganaron', 'hacer', 'unas', 'unos', 'sobre', 'entre', 'base', 'datos', 'links', 'link', 'dame', 'quiero', 'existe', 'alguna', 'nada', 'seguro', 'cannes', 'lions']);
     const keywords = queryNorm.replace(/[^\w\s]/gi, '').split(/\s+/).filter(w => w.length > 3 && !palabrasProhibidas.has(w));
     const aniosDetectados = queryNorm.match(/\b(20\d{2})\b/g) || [];
     const festivales = ['cannes', 'el ojo', 'clio', 'd&ad', 'eurobest'].filter(f => queryNorm.includes(f));
 
+    // 4. SCORING INTELIGENTE
     const calificadas = todasLasCampanas.map(c => {
       let score = 0;
       const metales = normalizar(c.METAL_SUMMARY || c.METAL);
@@ -76,7 +77,7 @@ export default async function handler(req, res) {
     calificadas.sort((a, b) => b._score - a._score);
     const seleccionadas = calificadas.slice(0, 12);
 
-    // 3. CONTEXTO DINÁMICO
+    // 5. CONTEXTO DINÁMICO (Contexto profundo para el top 3)
     const baseSintetizada = seleccionadas.map((c, i) => {
       const titulo = String(c.Title || c.TITULO_PIEZA || 'S/T');
       const marca = String(c.MARCA || 'S/M');
@@ -85,7 +86,7 @@ export default async function handler(req, res) {
       const linkBoard = c['Board image'] || c.URL || c.LINK || c.board_image || 'No disponible';
       
       let board = String(c['ANALISIS BOARD'] || '').replace(/\s+/g, ' ').trim();
-      const maxChars = i < 3 ? 1200 : 300;
+      const maxChars = i < 3 ? 1500 : 300; 
       if (board.length > maxChars) board = board.substring(0, maxChars) + '...';
 
       return `--- CASO #${i + 1} ---\nTITULO: "${titulo}"\nMARCA: ${marca}\nFESTIVAL: ${fest}\nMETALES: ${metales}\nLINK: ${linkBoard}\nBOARD: ${board}\n-------------------`;
@@ -108,7 +109,7 @@ REGLAS ESTRICTAS (ANTI-ALUCINACIONES):
 3. Si piden enlaces, usa Markdown: [Ver Board Oficial](URL).
 `;
 
-    // Preparar historiales para los diferentes formatos
+    // 6. PREPARACIÓN DE HISTORIAL (Máximo 30 turnos)
     const historialLargo = historial.slice(-30);
     const mensajesOpenAI = [
       { role: 'system', content: promptSistema },
@@ -125,9 +126,9 @@ REGLAS ESTRICTAS (ANTI-ALUCINACIONES):
       generationConfig: { temperature: 0.2, maxOutputTokens: 2000 }
     };
 
-    // 4. MOTORES DE IA (Funciones de llamada)
+    // 7. FUNCIONES DE LLAMADA (MOTORES)
     async function llamarGemini() {
-      if (!keyGemini) throw new Error('Key de Gemini no configurada');
+      if (!keyGemini) throw new Error('Key Gemini ausente');
       const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${keyGemini}`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payloadGemini)
       });
@@ -137,7 +138,7 @@ REGLAS ESTRICTAS (ANTI-ALUCINACIONES):
     }
 
     async function llamarGroq() {
-      if (!keyGroq) throw new Error('Key de Groq no configurada');
+      if (!keyGroq) throw new Error('Key Groq ausente');
       const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST', headers: { 'Authorization': `Bearer ${keyGroq}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ model: 'llama3-70b-8192', messages: mensajesOpenAI, temperature: 0.2, max_tokens: 2000 })
@@ -148,36 +149,40 @@ REGLAS ESTRICTAS (ANTI-ALUCINACIONES):
     }
 
     async function llamarOpenRouter() {
-      if (!keyOpenRouter) throw new Error('Key de OpenRouter no configurada');
+      if (!keyOpenRouter) throw new Error('Key OpenRouter ausente');
       const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST', headers: { 'Authorization': `Bearer ${keyOpenRouter}`, 'Content-Type': 'application/json', 'HTTP-Referer': 'https://festival-ai.vercel.app', 'X-Title': 'Festival AI' },
-        body: JSON.stringify({ model: 'qwen/qwen-2.5-72b-instruct:free', messages: mensajesOpenAI, temperature: 0.35, presence_penalty: 0.4, max_tokens: 2000 })
+        body: JSON.stringify({ model: 'meta-llama/llama-3.1-8b-instruct:free', messages: mensajesOpenAI, temperature: 0.35, presence_penalty: 0.4, max_tokens: 2000 })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error?.message || 'Error OpenRouter');
       return data.choices?.[0]?.message?.content;
     }
 
-    // 5. LÓGICA DE RUTEO (WATERFALL FALLBACK)
+    // 8. CASCADA DE RUTEO (Waterfall)
     let respuestaTexto = null;
 
     if (estrategia === 'auto') {
       try {
         respuestaTexto = await llamarGemini();
       } catch (err1) {
-        console.warn('Gemini falló, intentando Groq...', err1.message);
+        console.warn('Fallo Gemini, rutando a Groq...', err1.message);
         try {
           respuestaTexto = await llamarGroq();
         } catch (err2) {
-          console.warn('Groq falló, intentando OpenRouter...', err2.message);
-          respuestaTexto = await llamarOpenRouter();
+          console.warn('Fallo Groq, rutando a OpenRouter...', err2.message);
+          try {
+            respuestaTexto = await llamarOpenRouter();
+          } catch (err3) {
+            throw new Error(`Cascada colapsada. Error final (OpenRouter): ${err3.message}`);
+          }
         }
       }
     } else if (estrategia === 'gemini') { respuestaTexto = await llamarGemini(); }
     else if (estrategia === 'groq') { respuestaTexto = await llamarGroq(); }
     else if (estrategia === 'openrouter') { respuestaTexto = await llamarOpenRouter(); }
 
-    if (!respuestaTexto) return res.status(500).json({ error: 'Todos los proveedores fallaron o devolvieron respuestas vacías.' });
+    if (!respuestaTexto) return res.status(500).json({ error: 'Respuesta vacía del proveedor.' });
 
     return res.status(200).json({ respuesta: respuestaTexto });
 
