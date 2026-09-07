@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Festival AI | Creative Benchmark & Strategy</title>
   
-  <!-- Parser Markdown -->
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 
   <style>
@@ -32,7 +31,7 @@
       box-sizing: border-box;
       margin: 0;
       padding: 0;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     }
 
     body {
@@ -58,7 +57,6 @@
       overflow: hidden;
     }
 
-    /* Header */
     header {
       padding: 16px 24px;
       border-bottom: 1px solid var(--border);
@@ -113,7 +111,6 @@
       border-radius: 20px;
       font-size: 11px;
       font-weight: 600;
-      letter-spacing: 0.3px;
       border: 1px solid var(--border);
       background: var(--bg-card);
     }
@@ -145,7 +142,6 @@
       color: var(--accent);
     }
 
-    /* Chat Area */
     #chat-thread {
       flex: 1;
       overflow-y: auto;
@@ -186,7 +182,6 @@
       border-bottom-left-radius: 3px;
     }
 
-    /* Markdown Formats inside Bot */
     .bot h1, .bot h2, .bot h3 {
       color: var(--accent);
       margin: 16px 0 8px 0;
@@ -203,7 +198,6 @@
     .bot hr { border: 0; height: 1px; background: var(--border); margin: 18px 0; }
     .bot a { color: var(--accent); text-decoration: underline; }
 
-    /* Tables */
     .bot table {
       width: 100%;
       border-collapse: collapse;
@@ -228,7 +222,6 @@
       background: #0f1523;
     }
 
-    /* Input Footer */
     footer {
       padding: 16px 24px;
       background: var(--bg-surface);
@@ -278,7 +271,7 @@
       cursor: not-allowed;
     }
 
-    /* Modal de Configuración */
+    /* Modal */
     .modal-overlay {
       position: fixed;
       inset: 0;
@@ -392,7 +385,6 @@
 <body>
 
   <div class="app-container">
-    <!-- Header -->
     <header>
       <div class="brand">
         <div class="brand-logo">F</div>
@@ -413,14 +405,12 @@
       </div>
     </header>
 
-    <!-- Chat -->
     <main id="chat-thread">
       <div class="message bot">
-        Base de datos lista. Configura tu API Key en la esquina superior para habilitar tus consultas ilimitadas o empieza a pelotear con la clave del sistema.
+        Base de datos lista. Configura tu API Key en la esquina superior (Gemini u OpenRouter) para comenzar a pelotear con tus propios tokens.
       </div>
     </main>
 
-    <!-- Footer Input -->
     <footer>
       <form class="input-bar" id="chat-form">
         <input 
@@ -435,7 +425,6 @@
     </footer>
   </div>
 
-  <!-- Modal de Credenciales y Perfil -->
   <div class="modal-overlay" id="modal-settings">
     <div class="modal-card">
       <div class="modal-header">
@@ -444,15 +433,18 @@
       </div>
 
       <div class="form-group">
-        <label for="input-username">Tu Nombre o Apodo:</label>
-        <input type="text" id="input-username" class="form-control" placeholder="Ej. Alex / Dupla Creativa" />
+        <label for="select-provider">Proveedor del Modelo:</label>
+        <select id="select-provider" class="form-control">
+          <option value="gemini">Google Gemini (Claves AIzaSy... o AQ...)</option>
+          <option value="openrouter">OpenRouter (Claves sk-or-v1-...)</option>
+        </select>
       </div>
 
       <div class="form-group">
         <label for="input-apikey">Tu API Key Personal:</label>
-        <input type="password" id="input-apikey" class="form-control" placeholder="AIzaSy... (Gemini) o sk-or-v1-... (OpenRouter)" />
+        <input type="password" id="input-apikey" class="form-control" placeholder="Pega tu clave aquí" />
         <div class="hint">
-          Se guarda exclusivamente en el almacenamiento local de tu navegador (localStorage). El sistema detecta automáticamente si es Google Gemini u OpenRouter.
+          Guardada 100% de forma local en tu navegador (localStorage).
         </div>
       </div>
 
@@ -464,60 +456,49 @@
   </div>
 
   <script>
-    // Referencias DOM
     const chatThread = document.getElementById('chat-thread');
     const chatForm = document.getElementById('chat-form');
     const queryInput = document.getElementById('query-input');
     const btnSend = document.getElementById('btn-send');
 
-    // Modal
     const modalSettings = document.getElementById('modal-settings');
     const btnOpenSettings = document.getElementById('btn-open-settings');
     const btnCloseSettings = document.getElementById('btn-close-settings');
     const btnSaveSettings = document.getElementById('btn-save-settings');
     const btnClearSettings = document.getElementById('btn-clear-settings');
 
-    const inputUsername = document.getElementById('input-username');
+    const selectProvider = document.getElementById('select-provider');
     const inputApiKey = document.getElementById('input-apikey');
     const userDisplay = document.getElementById('user-display');
     const providerName = document.getElementById('provider-name');
     const statusDot = document.getElementById('status-dot');
 
-    // Cargar credenciales guardadas
     function syncUserConfig() {
-      const storedName = localStorage.getItem('festival_user_name') || '';
       const storedKey = localStorage.getItem('festival_api_key') || '';
+      const storedProv = localStorage.getItem('festival_provider') || 'gemini';
 
-      inputUsername.value = storedName;
       inputApiKey.value = storedKey;
+      selectProvider.value = storedProv;
 
-      if (storedName) {
-        userDisplay.innerText = storedName;
+      if (storedKey) {
+        userDisplay.innerText = 'Key Lista';
+        if (storedProv === 'gemini') {
+          providerName.innerText = 'Google Gemini (BYOK)';
+          providerName.style.color = 'var(--badge-gemini)';
+          statusDot.style.background = 'var(--badge-gemini)';
+        } else {
+          providerName.innerText = 'OpenRouter (BYOK)';
+          providerName.style.color = 'var(--badge-openrouter)';
+          statusDot.style.background = 'var(--badge-openrouter)';
+        }
       } else {
         userDisplay.innerText = 'Configurar';
-      }
-
-      // Reconocimiento de proveedor por firma de clave
-      if (storedKey.startsWith('AIzaSy')) {
-        providerName.innerText = 'Google Gemini (BYOK)';
-        providerName.style.color = 'var(--badge-gemini)';
-        statusDot.style.background = 'var(--badge-gemini)';
-      } else if (storedKey.startsWith('sk-or-v1-')) {
-        providerName.innerText = 'OpenRouter (BYOK)';
-        providerName.style.color = 'var(--badge-openrouter)';
-        statusDot.style.background = 'var(--badge-openrouter)';
-      } else if (storedKey.length > 0) {
-        providerName.innerText = 'API Key Activa';
-        providerName.style.color = 'var(--accent)';
-        statusDot.style.background = 'var(--accent)';
-      } else {
         providerName.innerText = 'Servidor Compartido';
         providerName.style.color = 'var(--text-muted)';
         statusDot.style.background = 'var(--text-dim)';
       }
     }
 
-    // Modal Events
     btnOpenSettings.onclick = () => modalSettings.classList.add('active');
     btnCloseSettings.onclick = () => modalSettings.classList.remove('active');
     modalSettings.onclick = (e) => {
@@ -525,37 +506,38 @@
     };
 
     btnSaveSettings.onclick = () => {
-      const nameVal = inputUsername.value.trim();
       const keyVal = inputApiKey.value.trim();
+      const provVal = selectProvider.value;
 
-      if (nameVal) localStorage.setItem('festival_user_name', nameVal);
-      else localStorage.removeItem('festival_user_name');
-
-      if (keyVal) localStorage.setItem('festival_api_key', keyVal);
-      else localStorage.removeItem('festival_api_key');
+      if (keyVal) {
+        localStorage.setItem('festival_api_key', keyVal);
+        localStorage.setItem('festival_provider', provVal);
+      } else {
+        localStorage.removeItem('festival_api_key');
+        localStorage.removeItem('festival_provider');
+      }
 
       syncUserConfig();
       modalSettings.classList.remove('active');
     };
 
     btnClearSettings.onclick = () => {
-      localStorage.removeItem('festival_user_name');
       localStorage.removeItem('festival_api_key');
-      inputUsername.value = '';
+      localStorage.removeItem('festival_provider');
       inputApiKey.value = '';
+      selectProvider.value = 'gemini';
       syncUserConfig();
       modalSettings.classList.remove('active');
     };
 
-    // Envío del chat
     chatForm.onsubmit = async (e) => {
       e.preventDefault();
       const query = queryInput.value.trim();
       if (!query) return;
 
       const userKey = localStorage.getItem('festival_api_key') || '';
+      const userProv = localStorage.getItem('festival_provider') || 'gemini';
 
-      // Render mensaje de usuario
       const userMsg = document.createElement('div');
       userMsg.className = 'message user';
       userMsg.innerText = query;
@@ -565,10 +547,9 @@
       btnSend.disabled = true;
       chatThread.scrollTop = chatThread.scrollHeight;
 
-      // Loader temporal
       const botMsg = document.createElement('div');
       botMsg.className = 'message bot';
-      botMsg.innerText = 'Analizando base de festivales y evaluando casos...';
+      botMsg.innerText = 'Analizando festivales y evaluando casos...';
       chatThread.appendChild(botMsg);
       chatThread.scrollTop = chatThread.scrollHeight;
 
@@ -577,7 +558,8 @@
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'x-user-key': userKey
+            'x-user-key': userKey,
+            'x-user-provider': userProv
           },
           body: JSON.stringify({ mensaje: query })
         });
@@ -587,7 +569,7 @@
         try {
           data = JSON.parse(rawText);
         } catch {
-          throw new Error('La consulta tardó demasiado y el servidor cortó la conexión. Intenta ser más específico con la categoría o festival.');
+          throw new Error('El servidor tardó demasiado o devolvió una respuesta vacía.');
         }
 
         if (!res.ok) {
@@ -603,7 +585,6 @@
       chatThread.scrollTop = chatThread.scrollHeight;
     };
 
-    // Inicializar estado al cargar
     syncUserConfig();
   </script>
 </body>
