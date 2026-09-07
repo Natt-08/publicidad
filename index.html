@@ -1,353 +1,49 @@
-<!DOCTYPE html>
-<html lang="es">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Chat de festivales</title>
-  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-  <style>
-    /* VARIABLES Y RESET (Se mantienen iguales) */
-    :root {
-      --gold-50:  #FFFCEB;
-      --gold-100: #FDF5C8;
-      --gold-200: #FBE98C;
-      --gold-300: #F9D850;
-      --gold-400: #F7C628;
-      --gold-500: #F1A60F;
-      --gold-600: #CB7909;
-      --gold-700: #B15A0C;
-      --gold-800: #904610;
-      --bg-sidebar: #121318;
-      --bg-main: #181920;
-      --bg-surface: #20212b;
-      --bg-card: #272834;
-      --border-subtle: #2d2f3d;
-      --text-primary: #F3F4F6;
-      --text-muted: #9CA3AF;
-      --text-dim: #6B7280;
-      --user-bubble: #272937;
-    }
-    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-    body { background-color: var(--bg-main); color: var(--text-primary); height: 100vh; display: flex; overflow: hidden; }
-    
-    /* ESTRUCTURA */
-    aside { width: 260px; background: var(--bg-sidebar); border-right: 1px solid var(--border-subtle); display: flex; flex-direction: column; flex-shrink: 0; transition: margin-left 0.3s ease; z-index: 20; }
-    aside.collapsed { margin-left: -260px; }
-    .sidebar-header { padding: 14px; }
-    .btn-new-chat { width: 100%; display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: transparent; color: var(--gold-100); border: 1px solid var(--border-subtle); border-radius: 8px; font-size: 13.5px; font-weight: 500; cursor: pointer; transition: all 0.2s; }
-    .btn-new-chat:hover { background: var(--bg-surface); border-color: var(--gold-500); color: var(--gold-400); }
-    .chat-history { flex: 1; overflow-y: auto; padding: 8px 12px; display: flex; flex-direction: column; gap: 4px; }
-    .history-item { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 6px; color: var(--text-muted); font-size: 13px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: all 0.15s; border-left: 3px solid transparent; }
-    .history-item:hover { background: var(--bg-surface); color: var(--gold-100); }
-    .history-item.active { background: var(--bg-surface); color: var(--gold-200); border-left-color: var(--gold-500); }
-    .sidebar-footer { padding: 12px 14px; border-top: 1px solid var(--border-subtle); display: flex; align-items: center; justify-content: space-between; }
-    .user-badge { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-muted); }
-    .user-avatar { width: 28px; height: 28px; border-radius: 50%; background: var(--gold-600); color: var(--gold-50); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 12px; }
-    
-    main { flex: 1; display: flex; flex-direction: column; height: 100vh; background: var(--bg-main); position: relative; }
-    .top-bar { height: 54px; padding: 0 20px; border-bottom: 1px solid var(--border-subtle); display: flex; align-items: center; justify-content: space-between; background: var(--bg-main); z-index: 10; }
-    .top-bar-left { display: flex; align-items: center; gap: 12px; }
-    .btn-toggle-sidebar { background: transparent; border: 1px solid var(--border-subtle); color: var(--text-muted); border-radius: 6px; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 14px; }
-    .btn-settings { background: var(--bg-surface); border: 1px solid var(--border-subtle); color: var(--gold-200); padding: 6px 12px; border-radius: 8px; font-size: 12.5px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 6px; }
-    
-    #chat-thread { flex: 1; overflow-y: auto; padding: 24px 16px 120px 16px; display: flex; flex-direction: column; align-items: center; scroll-behavior: smooth; }
-    .thread-inner { width: 100%; max-width: 840px; display: flex; flex-direction: column; gap: 24px; }
-    
-    /* PANTALLA BIENVENIDA Y CARDS */
-    .welcome-screen { text-align: center; margin: 40px auto 20px auto; max-width: 720px; }
-    .welcome-title { font-size: 30px; font-weight: 700; color: var(--gold-300); margin-bottom: 8px; }
-    .welcome-subtitle { font-size: 14px; color: var(--text-muted); margin-bottom: 36px; }
-    .cards-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; text-align: left; }
-    .prompt-card { background: var(--bg-surface); border: 1px solid var(--border-subtle); padding: 14px 16px; border-radius: 10px; cursor: pointer; }
-    .prompt-card:hover { border-color: var(--gold-500); transform: translateY(-2px); }
-    .prompt-card-title { font-size: 13.5px; font-weight: 600; color: var(--gold-200); margin-bottom: 4px; }
-    .prompt-card-desc { font-size: 12px; color: var(--text-dim); }
-
-    /* MENSAJES */
-    .message-row { display: flex; gap: 16px; width: 100%; line-height: 1.65; }
-    .message-row.user { justify-content: flex-end; }
-    .msg-avatar { width: 32px; height: 32px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: bold; flex-shrink: 0; }
-    .message-row.user .msg-avatar { background: var(--gold-700); color: var(--gold-50); order: 2; }
-    .message-row.bot .msg-avatar { background: linear-gradient(135deg, var(--gold-600), var(--gold-400)); color: #111; order: 1; }
-    .msg-body { max-width: 84%; font-size: 14.5px; color: var(--text-primary); }
-    .message-row.user .msg-body { background: var(--user-bubble); padding: 12px 18px; border-radius: 14px; border-top-right-radius: 2px; border: 1px solid var(--border-subtle); order: 1; }
-    .message-row.bot .msg-body { background: transparent; padding: 4px 0; order: 2; width: 100%; }
-
-    /* MARKDOWN */
-    .msg-body h1, .msg-body h2, .msg-body h3 { color: var(--gold-300); margin: 18px 0 10px 0; font-weight: 700; }
-    .msg-body h1 { font-size: 20px; border-bottom: 1px solid var(--border-subtle); padding-bottom: 6px; }
-    .msg-body p { margin-bottom: 12px; }
-    .msg-body strong { color: var(--gold-200); font-weight: 600; }
-    .msg-body ul, .msg-body ol { margin: 8px 0 14px 22px; }
-    .msg-body hr { border: 0; height: 1px; background: var(--border-subtle); margin: 20px 0; }
-    .msg-body a { color: var(--gold-400); text-decoration: none; font-weight: 600; border-bottom: 1px dashed var(--gold-500); }
-    .msg-body table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 13.5px; background: var(--bg-surface); border-radius: 8px; overflow: hidden; border: 1px solid var(--border-subtle); }
-    .msg-body th, .msg-body td { padding: 12px 14px; text-align: left; border: 1px solid var(--border-subtle); }
-    .msg-body th { background: #15161e; color: var(--gold-400); font-weight: 600; border-bottom: 2px solid var(--gold-600); }
-    .msg-body tr:nth-child(even) { background: rgba(255, 255, 255, 0.02); }
-
-    /* INPUT */
-    .input-container { position: absolute; bottom: 0; left: 0; right: 0; padding: 0 20px 24px 20px; background: linear-gradient(180deg, transparent 0%, var(--bg-main) 35%); display: flex; flex-direction: column; align-items: center; }
-    .input-box-wrapper { width: 100%; max-width: 840px; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 14px; padding: 6px 12px 6px 16px; display: flex; align-items: center; gap: 10px; }
-    .input-box-wrapper:focus-within { border-color: var(--gold-500); }
-    #query-input { flex: 1; background: transparent; border: none; color: var(--text-primary); font-size: 15px; outline: none; padding: 8px 0; }
-    .btn-send { width: 36px; height: 36px; border-radius: 8px; background: var(--gold-500); color: #111217; border: none; display: flex; align-items: center; justify-content: center; cursor: pointer; font-weight: bold; }
-    .btn-send:disabled { opacity: 0.5; cursor: not-allowed; }
-    .disclaimer { font-size: 11.5px; color: var(--text-dim); margin-top: 8px; }
-
-    /* MODAL */
-    .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.75); display: none; justify-content: center; align-items: center; z-index: 100; }
-    .modal-overlay.active { display: flex; }
-    .modal-card { background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 14px; width: 100%; max-width: 400px; padding: 24px; }
-    .form-control { width: 100%; padding: 11px; background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: 8px; color: #fff; margin-bottom: 16px; margin-top: 6px; }
-    .btn-save { background: var(--gold-500); color: #111; padding: 10px 20px; border-radius: 8px; font-weight: bold; border: none; cursor: pointer;}
-  </style>
-</head>
-<body>
-
-  <!-- SIDEBAR -->
-  <aside id="sidebar">
-    <div class="sidebar-header">
-      <button class="btn-new-chat" id="btn-new-chat"><span>+</span> Nueva sesión</button>
-    </div>
-    <!-- Contenedor dinámico de sesiones guardadas -->
-    <div class="chat-history" id="sidebar-history"></div>
-    <div class="sidebar-footer">
-      <div class="user-badge"><div class="user-avatar">J</div><span id="label-user">Jurado AI</span></div>
-    </div>
-  </aside>
-
-  <!-- MAIN -->
-  <main>
-    <div class="top-bar">
-      <div class="top-bar-left">
-        <button class="btn-toggle-sidebar" id="btn-toggle-sidebar">☰</button>
-        <div style="font-size: 13px; font-weight: 600; color: var(--gold-200);">Festival AI Engine</div>
-      </div>
-      <button class="btn-settings" id="btn-open-settings">⚙️ Config</button>
-    </div>
-
-    <div id="chat-thread">
-      <div class="thread-inner" id="thread-inner">
-        <!-- El welcome screen se inicializa vía JS -->
-      </div>
-    </div>
-
-    <div class="input-container">
-      <form class="input-box-wrapper" id="chat-form">
-        <input type="text" id="query-input" placeholder="Escribe tu consulta estratégica..." autocomplete="off" required />
-        <button type="submit" class="btn-send" id="btn-send">↑</button>
-      </form>
-      <div class="disclaimer">Sesión activa. Historial guardado localmente (Máx 5).</div>
-    </div>
-  </main>
-
-  <!-- MODAL -->
+<!-- REEMPLAZA EL MODAL EXISTENTE CON ESTE -->
   <div class="modal-overlay" id="modal-settings">
     <div class="modal-card">
       <div style="display:flex; justify-content:space-between; margin-bottom:16px;">
-        <h3 style="color:var(--gold-200);">Ajustes</h3>
+        <h3 style="color:var(--gold-200);">Configuración & Fallback</h3>
         <button id="btn-close-settings" style="background:none; border:none; color:#fff; cursor:pointer;">&times;</button>
       </div>
-      <label>Proveedor API:</label>
-      <select id="select-provider" class="form-control">
-        <option value="openrouter">OpenRouter (MiniMax M3)</option>
-        <option value="gemini">Google Gemini</option>
+      
+      <div style="font-size: 12px; color: var(--text-dim); margin-bottom: 16px;">
+        Para 100% de disponibilidad gratis, ingresa múltiples llaves. El modo <b>CASCADA</b> intentará usar Gemini, luego Groq y finalmente OpenRouter si fallan los anteriores.
+      </div>
+
+      <label style="font-size: 12px; color: var(--text-muted);">Estrategia de Ruteo:</label>
+      <select id="select-strategy" class="form-control" style="margin-bottom: 12px;">
+        <option value="auto">🌟 Auto-Cascada (Gemini → Groq → OpenRouter)</option>
+        <option value="gemini">Solo Google Gemini</option>
+        <option value="groq">Solo Groq (Llama 3)</option>
+        <option value="openrouter">Solo OpenRouter (Qwen Free)</option>
       </select>
-      <label>API Key:</label>
-      <input type="password" id="input-apikey" class="form-control" placeholder="sk-or-... / AIzaSy..." />
-      <div style="text-align:right;">
-        <button type="button" class="btn-save" id="btn-save-settings">Guardar</button>
+
+      <label style="font-size: 12px; color: var(--text-muted);">Google Gemini Key:</label>
+      <input type="password" id="input-gemini" class="form-control" placeholder="AIzaSy..." style="margin-bottom: 12px;" />
+
+      <label style="font-size: 12px; color: var(--text-muted);">Groq API Key:</label>
+      <input type="password" id="input-groq" class="form-control" placeholder="gsk_..." style="margin-bottom: 12px;" />
+
+      <label style="font-size: 12px; color: var(--text-muted);">OpenRouter API Key:</label>
+      <input type="password" id="input-openrouter" class="form-control" placeholder="sk-or-v1-..." style="margin-bottom: 16px;" />
+
+      <div style="text-align:right; border-top: 1px solid var(--border-subtle); padding-top: 12px;">
+        <button type="button" class="btn-save" id="btn-save-settings">Guardar Llaves</button>
       </div>
     </div>
   </div>
 
   <script>
-    /* =========================================================
-       SISTEMA MULTI-SESIÓN CON LOCALSTORAGE (MÁX 5 CHATS)
-       ========================================================= */
-    let currentChatId = null;
-    let chatHistory = []; 
-
-    function getSavedChats() {
-      return JSON.parse(localStorage.getItem('festival_sessions')) || [];
-    }
-
-    function saveChatsToLocal(chats) {
-      // Retenemos solo las últimas 5 conversaciones
-      if (chats.length > 5) {
-        chats = chats.slice(chats.length - 5);
-      }
-      localStorage.setItem('festival_sessions', JSON.stringify(chats));
-      renderSidebar(chats);
-    }
-
-    function renderSidebar(chats) {
-      const sidebarContainer = document.getElementById('sidebar-history');
-      sidebarContainer.innerHTML = '';
-      
-      // Mostrar más reciente arriba
-      [...chats].reverse().forEach(chat => {
-        const div = document.createElement('div');
-        div.className = `history-item ${chat.id === currentChatId ? 'active' : ''}`;
-        div.innerHTML = `💬 ${escapeHtml(chat.title)}`;
-        div.onclick = () => loadChat(chat.id);
-        sidebarContainer.appendChild(div);
-      });
-    }
-
-    function renderWelcomeScreen() {
-      return `
-        <div class="welcome-screen" id="welcome-screen">
-          <div class="welcome-title">Festival AI</div>
-          <div class="welcome-subtitle">Benchmarking e historial persistente (5 sesiones).</div>
-          <div class="cards-grid">
-            <div class="prompt-card" onclick="lanzarPrompt('Analiza UNTOUCHABLES de Eva Clinic y pásame su link')">
-              <div class="prompt-card-title">🔬 Termografía</div>
-              <div class="prompt-card-desc">Cribado térmico para superar barreras.</div>
-            </div>
-            <div class="prompt-card" onclick="lanzarPrompt('¿Qué campañas usaron gaming como medio?')">
-              <div class="prompt-card-title">🎮 Gaming & eSports</div>
-              <div class="prompt-card-desc">Contrasta piezas ganadoras vs eliminadas.</div>
-            </div>
-          </div>
-        </div>`;
-    }
-
-    function renderMessages() {
-      const thread = document.getElementById('thread-inner');
-      thread.innerHTML = '';
-      if (chatHistory.length === 0) {
-        thread.innerHTML = renderWelcomeScreen();
-        return;
-      }
-      
-      chatHistory.forEach(msg => {
-        const row = document.createElement('div');
-        row.className = `message-row ${msg.role === 'user' ? 'user' : 'bot'}`;
-        
-        if (msg.role === 'user') {
-          row.innerHTML = `<div class="msg-avatar">TÚ</div><div class="msg-body">${escapeHtml(msg.content)}</div>`;
-        } else {
-          row.innerHTML = `<div class="msg-avatar">★</div><div class="msg-body">${marked.parse(msg.content)}</div>`;
-        }
-        thread.appendChild(row);
-      });
-      document.getElementById('chat-thread').scrollTop = document.getElementById('chat-thread').scrollHeight;
-    }
-
-    function loadChat(id) {
-      const chats = getSavedChats();
-      const chat = chats.find(c => c.id === id);
-      if(!chat) return;
-
-      currentChatId = chat.id;
-      chatHistory = chat.messages || [];
-      
-      renderSidebar(chats);
-      renderMessages();
-    }
-
-    // Inicializar nueva sesión
-    document.getElementById('btn-new-chat').onclick = () => {
-      currentChatId = null;
-      chatHistory = [];
-      renderSidebar(getSavedChats());
-      renderMessages();
-    };
-
-    function lanzarPrompt(txt) {
-      document.getElementById('query-input').value = txt;
-      document.getElementById('chat-form').dispatchEvent(new Event('submit'));
-    }
+    // ... [Mantén aquí el bloque de "SISTEMA MULTI-SESIÓN CON LOCALSTORAGE" que ya te di en la respuesta anterior] ...
 
     /* =========================================================
-       LÓGICA DE COMUNICACIÓN (API)
+       ACTUALIZACIÓN LÓGICA DE CONFIGURACIÓN UI
        ========================================================= */
-    const chatForm = document.getElementById('chat-form');
-    const queryInput = document.getElementById('query-input');
-    const btnSend = document.getElementById('btn-send');
-    const threadInner = document.getElementById('thread-inner');
-
-    chatForm.onsubmit = async (e) => {
-      e.preventDefault();
-      const txt = queryInput.value.trim();
-      if (!txt) return;
-
-      // 1. Si es mensaje nuevo, creamos ID y guardamos título
-      const isFirstMessage = !currentChatId;
-      if (isFirstMessage) {
-        currentChatId = Date.now().toString();
-        const title = txt.length > 25 ? txt.substring(0, 25) + '...' : txt;
-        const chats = getSavedChats();
-        chats.push({ id: currentChatId, title: title, messages: [] });
-        saveChatsToLocal(chats);
-      }
-
-      // 2. Renderizar pregunta del usuario
-      chatHistory.push({ role: 'user', content: txt });
-      renderMessages();
-      queryInput.value = '';
-      btnSend.disabled = true;
-
-      // Mostrar cargando
-      const botRow = document.createElement('div');
-      botRow.className = 'message-row bot';
-      botRow.innerHTML = `<div class="msg-avatar">★</div><div class="msg-body" style="color: var(--gold-300);">Auditoría en proceso...</div>`;
-      threadInner.appendChild(botRow);
-      document.getElementById('chat-thread').scrollTop = document.getElementById('chat-thread').scrollHeight;
-
-      // 3. Fetch al servidor
-      const userKey = localStorage.getItem('festival_user_key') || '';
-      const userProv = localStorage.getItem('festival_user_provider') || 'openrouter';
-
-      try {
-        const res = await fetch('/api/chat', {
-          method: 'POST',
-          headers: { 
-            'Content-Type': 'application/json',
-            'x-user-key': userKey,
-            'x-user-provider': userProv
-          },
-          body: JSON.stringify({ 
-            mensaje: txt,
-            historial: chatHistory.slice(0, -1) // Enviamos la memoria (excepto la pregunta actual)
-          })
-        });
-
-        const rawText = await res.text();
-        let data;
-        try { data = JSON.parse(rawText); } 
-        catch { throw new Error('Error del servidor o timeout.'); }
-
-        if (!res.ok) {
-          throw new Error(data.error || 'Fallo en la consulta.');
-        }
-
-        // 4. Guardar respuesta de la IA
-        chatHistory.push({ role: 'assistant', content: data.respuesta });
-        renderMessages();
-
-        // 5. Actualizar LocalStorage con la nueva conversación completa
-        const chats = getSavedChats();
-        const chatIndex = chats.findIndex(c => c.id === currentChatId);
-        if (chatIndex !== -1) {
-          chats[chatIndex].messages = chatHistory;
-          saveChatsToLocal(chats);
-        }
-
-      } catch (err) {
-        botRow.querySelector('.msg-body').innerHTML = `<span style="color: #ef4444;">Error: ${err.message}</span>`;
-      }
-
-      btnSend.disabled = false;
-    };
-
-    /* =========================================================
-       UTILIDADES & CONFIGURACIÓN UI
-       ========================================================= */
-    function escapeHtml(str) {
-      return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    function syncConfig() {
+      document.getElementById('input-gemini').value = localStorage.getItem('festival_gemini') || '';
+      document.getElementById('input-groq').value = localStorage.getItem('festival_groq') || '';
+      document.getElementById('input-openrouter').value = localStorage.getItem('festival_or') || '';
+      document.getElementById('select-strategy').value = localStorage.getItem('festival_strategy') || 'auto';
     }
 
     const modalSettings = document.getElementById('modal-settings');
@@ -355,20 +51,31 @@
     document.getElementById('btn-close-settings').onclick = () => modalSettings.classList.remove('active');
     
     document.getElementById('btn-save-settings').onclick = () => {
-      localStorage.setItem('festival_user_key', document.getElementById('input-apikey').value.trim());
-      localStorage.setItem('festival_user_provider', document.getElementById('select-provider').value);
+      localStorage.setItem('festival_gemini', document.getElementById('input-gemini').value.trim());
+      localStorage.setItem('festival_groq', document.getElementById('input-groq').value.trim());
+      localStorage.setItem('festival_or', document.getElementById('input-openrouter').value.trim());
+      localStorage.setItem('festival_strategy', document.getElementById('select-strategy').value);
       modalSettings.classList.remove('active');
     };
 
-    document.getElementById('btn-toggle-sidebar').onclick = () => document.getElementById('sidebar').classList.toggle('collapsed');
+    /* ACTUALIZACIÓN FETCH (Añadir los nuevos headers al llamar a la API) */
+    chatForm.onsubmit = async (e) => {
+      // ... [Mismo código inicial de validación y renderizado visual] ...
 
-    // Inicialización al cargar la página
-    window.onload = () => {
-      document.getElementById('input-apikey').value = localStorage.getItem('festival_user_key') || '';
-      document.getElementById('select-provider').value = localStorage.getItem('festival_user_provider') || 'openrouter';
-      renderSidebar(getSavedChats());
-      renderMessages();
-    };
-  </script>
-</body>
-</html>
+      try {
+        const res = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json',
+            'x-gemini-key': localStorage.getItem('festival_gemini') || '',
+            'x-groq-key': localStorage.getItem('festival_groq') || '',
+            'x-openrouter-key': localStorage.getItem('festival_or') || '',
+            'x-strategy': localStorage.getItem('festival_strategy') || 'auto'
+          },
+          body: JSON.stringify({ 
+            mensaje: txt,
+            historial: chatHistory.slice(0, -1) // Enviamos la memoria 
+          })
+        });
+        
+        // ... [El resto del manejo de la respuesta se mantiene idéntico] ...
