@@ -1,4 +1,4 @@
-import Groq from 'groq-sdk';
+import { Groq } from 'groq-sdk';
 import fs from 'fs';
 import path from 'path';
 
@@ -7,7 +7,6 @@ const groq = new Groq({
 });
 
 export default async function handler(req, res) {
-  // Configuración de encabezados CORS y método
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Método no permitido' });
   }
@@ -18,12 +17,12 @@ export default async function handler(req, res) {
   }
 
   try {
-    // 1. Cargar la base de datos de campañas de forma segura
+    // 1. Cargar el JSON con las campañas
     const filePath = path.join(process.cwd(), 'campanas.json');
     const fileData = fs.readFileSync(filePath, 'utf8');
     const campanas = JSON.parse(fileData);
 
-    // 2. Compactar campos para optimizar el consumo de tokens
+    // 2. Reducir campos para evitar exceder límites de tokens
     const datosCompactos = campanas.map(c => ({
       pieza: c.TITULO_PIEZA || c.titulo_pieza || '',
       marca: c.MARCA || c.marca || '',
@@ -34,43 +33,42 @@ export default async function handler(req, res) {
       link: c.LINK || c.link || ''
     }));
 
-    // 3. Prompt de sistema especializado
     const promptSistema = `
-Eres un estratega y director creativo senior experto en festivales publicitarios.
-Tienes acceso a esta base de datos curada con campañas ganadoras:
+Eres un estratega y director creativo publicitario experto en festivales.
+Tienes acceso a esta base de campañas ganadoras:
 ${JSON.stringify(datosCompactos)}
 
 INSTRUCCIONES:
-1. Responde a la pregunta del usuario con visión estratégica, profundidad e inspiración publicitaria.
-2. Es OBLIGATORIO citar ejemplos específicos de la base de datos que sirvan como referencia directa para la duda o brief planteado.
-3. Para cada caso mencionado, incluye siempre:
-   - Nombre de la pieza
-   - Marca
-   - Festival, Año y Metal
-   - El insight o reto
-   - La idea o ejecución clave
-   - El enlace de referencia (LINK) si está disponible.
-4. Mantén un tono creativo, directo, profesional y claro.
+1. Responde a la pregunta del usuario con visión estratégica e inspiración.
+2. Cita obligatoriamente casos específicos de la base provista que resuelvan la duda.
+3. Para cada caso incluye: Nombre de la pieza, Marca, Festival/Año/Metal, insight, idea y su LINK.
 `;
 
-    // 4. Llamada a la API de Groq
+    // 3. Llamada idéntica a tu fragmento oficial
     const chatCompletion = await groq.chat.completions.create({
       messages: [
         { role: 'system', content: promptSistema },
         { role: 'user', content: mensaje }
       ],
-      model: 'openai/gpt-oss-120b',
-      temperature: 0.4,
-      max_completion_tokens: 1024,
+      model: "openai/gpt-oss-120b",
+      temperature: 1,
+      max_completion_tokens: 2048,
+      top_p: 1,
+      stream: true,
+      reasoning_effort: "medium",
+      stop: null
     });
 
-    const respuesta = chatCompletion.choices[0]?.message?.content || 'No se obtuvo respuesta del modelo.';
-    return res.status(200).json({ respuesta });
+    // 4. Juntar los pedazos (chunks) del stream antes de responder
+    let respuestaFinal = '';
+    for await (const chunk of chatCompletion) {
+      respuestaFinal += chunk.choices[0]?.delta?.content || '';
+    }
+
+    return res.status(200).json({ respuesta: respuestaFinal || 'Sin respuesta generada.' });
 
   } catch (error) {
-    console.error('Error detallado en la API:', error);
-    return res.status(500).json({ 
-      error: error.message || 'Error interno al procesar la solicitud' 
-    });
+    console.error('Error detallado:', error);
+    return res.status(500).json({ error: error.message || 'Error interno del servidor' });
   }
 }
