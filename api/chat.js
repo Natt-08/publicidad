@@ -34,7 +34,7 @@ export default async function handler(req, res) {
 
     const query = String(mensaje || '').toLowerCase();
 
-    // Filtros
+    // Filtros y scoring en memoria
     const aniosDetectados = query.match(/\b(20\d{2})\b/g) || [];
     const festivales = ['cannes', 'el ojo', 'clio', 'd&ad', 'eurobest', 'dubai lynx'].filter(f => query.includes(f));
     const categorias = ['outdoor', 'film', 'direct', 'print', 'pr', 'design', 'activation', 'purpose', 'media', 'creative data'].filter(c => query.includes(c));
@@ -100,7 +100,7 @@ export default async function handler(req, res) {
     }).join('\n');
 
     const promptSistema = `
-Eres un analista estratégico y jurado experto de Cannes Lions.
+Eres un analista estratégico y jurado experto de festivales publicitarios (Cannes Lions).
 Tienes sobre la mesa una selección optimizada de campañas relevantes:
 
 SELECCIÓN DE CASOS:
@@ -110,20 +110,19 @@ PAUTAS DE RESPUESTA:
 1. Responde de forma directa, analítica y sin roleplay ni acotaciones teatrales.
 2. Si piden un versus:
    - Contrasta ganadoras (Grand Prix / Gold) frente a Shortlists / No ganadoras.
-   - Organiza el análisis principal en una **Tabla Markdown** (Columnas: Caso & Marca | Metal | Tensión / Insight | Brecha Estratégica).
+   - Presenta la síntesis comparativa mediante una **Tabla Markdown** (Columnas: Caso & Marca | Metal | Tensión / Insight | Brecha Estratégica).
    - Analiza qué hizo que una ganara (fricción real, utilidad o producto integrado) frente a la superficialidad de la no ganadora.
-3. Cita nombres exactos de piezas y marcas.
+3. Cita obligatoriamente los nombres y marcas exactas de la lista.
 4. Concluye con una pregunta estratégica orientada al reto planteado.
 `;
 
     let respuestaTexto = null;
 
-    // DETECCIÓN: Es Gemini si lo indica el header O si empieza con AIzaSy o AQ
     const esGemini = headerProvider === 'gemini' || apiKey.startsWith('AIzaSy') || apiKey.startsWith('AQ');
 
     if (esGemini) {
-      // LLAMADA DIRECTA A GEMINI
-      const urlGemini = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+      // Endpoint oficial actualizado a gemini-3.6-flash
+      const urlGemini = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`;
       const payloadGemini = {
         contents: [
           {
@@ -151,7 +150,7 @@ PAUTAS DE RESPUESTA:
       respuestaTexto = data.candidates?.[0]?.content?.parts?.[0]?.text;
 
     } else {
-      // LLAMADA A OPENROUTER
+      // Llamada a OpenRouter como alternativa
       const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST',
         headers: {
