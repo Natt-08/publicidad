@@ -25,30 +25,29 @@ export default async function handler(req, res) {
     const fileData = readFileSync(filePath, 'utf8');
     const todasLasCampanas = JSON.parse(fileData);
 
-    const query = mensaje.toLowerCase();
+    const query = String(mensaje || '').toLowerCase();
 
     // 1. Detección de intenciones y filtros en la consulta
     const aniosDetectados = query.match(/\b(20\d{2})\b/g) || [];
     const festivales = ['cannes', 'el ojo', 'clio', 'd&ad', 'eurobest', 'dubai lynx'].filter(f => query.includes(f));
     const categorias = ['outdoor', 'film', 'direct', 'print', 'pr', 'design', 'activation', 'purpose', 'media', 'creative data'].filter(c => query.includes(c));
 
-    // Palabras clave ignorando términos comunes
     const palabrasIgnoradas = new Set(['para', 'como', 'este', 'esta', 'campañas', 'versus', 'piezas', 'ganaron', 'hacer', 'unas', 'unos', 'sobre', 'entre']);
     const keywords = query
       .replace(/[^\wáéíóúñ\s]/gi, '')
       .split(/\s+/)
       .filter(w => w.length > 3 && !palabrasIgnoradas.has(w));
 
-    // 2. Sistema de Scoring y Filtrado en Memoria
+    // 2. Sistema de Scoring con conversión explícita a String
     const calificadas = todasLasCampanas.map(c => {
       let score = 0;
-      const metales = (c.METAL_SUMMARY || c.METAL || '').toLowerCase();
-      const titulo = (c.Title || c.TITULO_PIEZA || '').toLowerCase();
-      const marca = (c.MARCA || '').toLowerCase();
-      const cat = (c.CATEGORIA_SUMMARY || c.CATEGORIA || '').toLowerCase();
-      const fest = (c.FESTIVAL || '').toLowerCase();
+      const metales = String(c.METAL_SUMMARY || c.METAL || '').toLowerCase();
+      const titulo = String(c.Title || c.TITULO_PIEZA || '').toLowerCase();
+      const marca = String(c.MARCA || '').toLowerCase();
+      const cat = String(c.CATEGORIA_SUMMARY || c.CATEGORIA || '').toLowerCase();
+      const fest = String(c.FESTIVAL || '').toLowerCase();
       const anio = String(c.AÑO || c.ANIO || '');
-      const board = (c['ANALISIS BOARD'] || '').toLowerCase();
+      const board = String(c['ANALISIS BOARD'] || '').toLowerCase();
 
       // Priorización de metales mayores
       if (metales.includes('grand prix')) score += 25;
@@ -72,7 +71,7 @@ export default async function handler(req, res) {
         if (cat.includes(catItem)) score += 25;
       });
 
-      // Coincidencia por palabras clave en título, marca o board
+      // Coincidencia por palabras clave
       keywords.forEach(kw => {
         if (titulo.includes(kw)) score += 30;
         if (marca.includes(kw)) score += 25;
@@ -82,19 +81,19 @@ export default async function handler(req, res) {
       return { ...c, _score: score };
     });
 
-    // 3. Selección del subconjunto más representativo (máximo 40 campañas)
+    // 3. Selección de las 40 campañas con mejor puntaje
     calificadas.sort((a, b) => b._score - a._score);
     const seleccionadas = calificadas.slice(0, 40);
 
-    // 4. Formateo compacto del subconjunto seleccionado
+    // 4. Formateo de las piezas seleccionadas
     const baseSintetizada = seleccionadas.map((c, i) => {
-      const titulo = c.Title || c.TITULO_PIEZA || 'S/T';
-      const marca = c.MARCA || 'S/M';
-      const fest = `${c.FESTIVAL || 'CANNES'} ${c.AÑO || c.ANIO || ''}`.trim();
-      const cat = c.CATEGORIA_SUMMARY || c.CATEGORIA || '';
-      const metales = c.METAL_SUMMARY || c.METAL || 'NO GANO';
+      const titulo = String(c.Title || c.TITULO_PIEZA || 'S/T');
+      const marca = String(c.MARCA || 'S/M');
+      const fest = `${String(c.FESTIVAL || 'CANNES')} ${String(c.AÑO || c.ANIO || '')}`.trim();
+      const cat = String(c.CATEGORIA_SUMMARY || c.CATEGORIA || '');
+      const metales = String(c.METAL_SUMMARY || c.METAL || 'NO GANO');
       
-      let board = (c['ANALISIS BOARD'] || '').replace(/\s+/g, ' ').trim();
+      let board = String(c['ANALISIS BOARD'] || '').replace(/\s+/g, ' ').trim();
       if (board.length > 180) board = board.substring(0, 180) + '...';
 
       let maxMetal = 'SHORTLIST';
@@ -107,20 +106,20 @@ export default async function handler(req, res) {
     }).join('\n');
 
     const promptSistema = `
-Eres un analista estratégico y jurado experto de Cannes Lions.
-Tienes sobre la mesa una selección optimizada de las campañas más relevantes extraídas de nuestra base de datos para responder a la consulta actual:
+Eres un analista estratégico y jurado de Cannes Lions.
+Tienes sobre la mesa una selección optimizada de campañas relevantes:
 
-SELECCIÓN DE CASOS RELEVANTES:
+SELECCIÓN DE CASOS:
 ${baseSintetizada}
 
-INSTRUCCIONES CLAVE:
-1. Responde de forma directa, analítica y sin rodeos corporativos ni roleplay teatral.
-2. Si te piden un versus de categoría, año o temática:
-   - Contrasta los casos ganadores (Grand Prix / Gold) frente a los que quedaron en Shortlist o no ganaron.
-   - Presenta la síntesis comparativa mediante una **Tabla Markdown** limpia (Columnas: Caso & Marca | Metal | Tensión / Insight | Brecha Estratégica).
-   - Analiza por qué la idea ganadora transformó el negocio o la cultura mientras que la no ganadora se quedó en un gesto superficial o predecible.
-3. Cita obligatoriamente los nombres y marcas exactas que aparecen en la lista.
-4. Concluye con una pregunta estratégica orientada a desafiar el brief o reto planteado.
+PAUTAS DE RESPUESTA:
+1. Responde de forma directa, analítica y sin roleplay ni acotaciones teatrales.
+2. Si solicitan un versus:
+   - Contrasta ganadoras (Grand Prix / Gold) frente a Shortlists / No ganadoras.
+   - Presenta la síntesis comparativa en una **Tabla Markdown** (Columnas: Caso & Marca | Metal | Tensión / Insight | Brecha Estratégica).
+   - Analiza la diferencia entre la transformación de negocio/cultural vs. la mera representación superficial.
+3. Cita nombres exactos de piezas y marcas presentes en el listado.
+4. Concluye con una pregunta estratégica orientada al brief o reto creativo.
 `;
 
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
