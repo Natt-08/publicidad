@@ -3,255 +3,694 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Festival AI - Benchmarking Estratégico</title>
+  <title>Festival AI — Jury Room & Benchmark</title>
   
-  <!-- Parser de Markdown -->
+  <!-- Parser Markdown -->
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 
   <style>
     :root {
-      --bg-main: #090d16;
-      --bg-panel: #111827;
-      --bg-bubble-user: #0284c7;
-      --bg-bubble-bot: #1a2234;
-      --border-color: #1f293d;
-      --accent: #38bdf8;
-      --text-main: #f1f5f9;
-      --text-muted: #94a3b8;
+      /* Paleta de la imagen (Golden / Ochre Festival) */
+      --gold-50:  #FFFCEB;
+      --gold-100: #FDF5C8;
+      --gold-200: #FBE98C;
+      --gold-300: #F9D850;
+      --gold-400: #F7C628;
+      --gold-500: #F1A60F;
+      --gold-600: #CB7909;
+      --gold-700: #B15A0C;
+      --gold-800: #904610;
+      --gold-900: #763A11;
+      --gold-950: #441D04;
+
+      /* Estructura UI LibreChat Dark */
+      --bg-sidebar: #121318;
+      --bg-main: #181920;
+      --bg-surface: #20212b;
+      --bg-card: #272834;
+      --border-subtle: #2d2f3d;
+      --border-gold: rgba(241, 166, 15, 0.25);
+
+      --text-primary: #F3F4F6;
+      --text-muted: #9CA3AF;
+      --text-dim: #6B7280;
+
+      --user-bubble: #272937;
+      --bot-bubble: transparent;
     }
 
     * {
       box-sizing: border-box;
       margin: 0;
       padding: 0;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
     }
 
     body {
       background-color: var(--bg-main);
-      color: var(--text-main);
-      min-height: 100vh;
+      color: var(--text-primary);
+      height: 100vh;
       display: flex;
-      justify-content: center;
-      padding: 20px;
+      overflow: hidden;
     }
 
-    .container {
-      width: 100%;
-      max-width: 900px;
+    /* =========================================
+       SIDEBAR (Estilo LibreChat)
+       ========================================= */
+    aside {
+      width: 260px;
+      background: var(--bg-sidebar);
+      border-right: 1px solid var(--border-subtle);
       display: flex;
       flex-direction: column;
-      height: 92vh;
+      flex-shrink: 0;
+      transition: all 0.3s ease;
+      z-index: 20;
     }
 
-    header {
-      text-align: center;
-      margin-bottom: 16px;
+    aside.collapsed {
+      margin-left: -260px;
     }
 
-    header h1 {
-      font-size: 24px;
-      font-weight: 700;
-      color: var(--accent);
-      letter-spacing: -0.5px;
+    .sidebar-header {
+      padding: 14px;
     }
 
-    header p {
-      color: var(--text-muted);
-      font-size: 14px;
-      margin-top: 4px;
+    .btn-new-chat {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      background: transparent;
+      color: var(--gold-100);
+      border: 1px solid var(--border-subtle);
+      border-radius: 8px;
+      font-size: 13.5px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
     }
 
-    #chat {
+    .btn-new-chat:hover {
+      background: var(--bg-surface);
+      border-color: var(--gold-500);
+      color: var(--gold-400);
+    }
+
+    .chat-history {
       flex: 1;
       overflow-y: auto;
-      background: var(--bg-panel);
-      padding: 24px;
-      border-radius: 16px;
+      padding: 8px 12px;
       display: flex;
       flex-direction: column;
-      gap: 18px;
-      border: 1px solid var(--border-color);
-      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4);
+      gap: 4px;
     }
 
-    .msg {
-      padding: 16px 20px;
-      border-radius: 12px;
-      max-width: 90%;
-      line-height: 1.6;
-      font-size: 14.5px;
-      word-break: break-word;
+    .history-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 9px 12px;
+      border-radius: 6px;
+      color: var(--text-muted);
+      font-size: 13px;
+      cursor: pointer;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      transition: background 0.15s, color 0.15s;
     }
 
-    .user {
-      background: var(--bg-bubble-user);
-      align-self: flex-end;
-      color: #ffffff;
-      border-bottom-right-radius: 4px;
+    .history-item:hover, .history-item.active {
+      background: var(--bg-surface);
+      color: var(--gold-100);
     }
 
-    .bot {
-      background: var(--bg-bubble-bot);
-      align-self: flex-start;
-      color: var(--text-main);
-      border: 1px solid var(--border-color);
-      border-bottom-left-radius: 4px;
+    .sidebar-footer {
+      padding: 12px 14px;
+      border-top: 1px solid var(--border-subtle);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
     }
 
-    /* Formato de Markdown renderizado */
-    .bot h1, .bot h2, .bot h3 {
-      color: var(--accent);
-      margin: 16px 0 8px 0;
-      line-height: 1.3;
+    .user-badge {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      color: var(--text-muted);
     }
-    .bot h1 { font-size: 20px; border-bottom: 1px solid var(--border-color); padding-bottom: 6px; }
-    .bot h2 { font-size: 17px; }
-    .bot h3 { font-size: 15px; }
 
-    .bot p { margin-bottom: 10px; }
-    .bot p:last-child { margin-bottom: 0; }
+    .user-avatar {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: var(--gold-600);
+      color: var(--gold-50);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 12px;
+    }
 
-    .bot strong {
-      color: #38bdf8;
+    /* =========================================
+       MAIN CHAT CONTAINER
+       ========================================= */
+    main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      background: var(--bg-main);
+      position: relative;
+    }
+
+    /* Top Navigation Bar */
+    .top-bar {
+      height: 54px;
+      padding: 0 20px;
+      border-bottom: 1px solid var(--border-subtle);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: var(--bg-main);
+      z-index: 10;
+    }
+
+    .top-bar-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .btn-toggle-sidebar {
+      background: transparent;
+      border: 1px solid var(--border-subtle);
+      color: var(--text-muted);
+      border-radius: 6px;
+      width: 32px;
+      height: 32px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-size: 14px;
+      transition: all 0.2s;
+    }
+
+    .btn-toggle-sidebar:hover {
+      color: var(--gold-400);
+      border-color: var(--gold-500);
+    }
+
+    /* Selector de Modelos LibreChat Style */
+    .model-selector-btn {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      padding: 6px 12px;
+      border-radius: 8px;
+      color: var(--gold-200);
+      font-size: 13px;
       font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
     }
 
-    .bot ul, .bot ol {
-      margin-left: 20px;
-      margin-bottom: 12px;
+    .model-selector-btn:hover {
+      border-color: var(--gold-500);
     }
 
-    .bot li {
+    .model-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--gold-500);
+      box-shadow: 0 0 8px var(--gold-500);
+    }
+
+    /* Chat Messages Stream */
+    #chat-thread {
+      flex: 1;
+      overflow-y: auto;
+      padding: 24px 16px 120px 16px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      scroll-behavior: smooth;
+    }
+
+    .thread-inner {
+      width: 100%;
+      max-width: 840px;
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }
+
+    /* Vista de Bienvenida (Estilo LibreChat / ChatGPT) */
+    .welcome-screen {
+      text-align: center;
+      margin: 40px auto 20px auto;
+      max-width: 720px;
+    }
+
+    .welcome-title {
+      font-size: 32px;
+      font-weight: 700;
+      color: var(--gold-300);
+      letter-spacing: -0.5px;
+      margin-bottom: 8px;
+    }
+
+    .welcome-subtitle {
+      font-size: 14px;
+      color: var(--text-muted);
+      margin-bottom: 36px;
+    }
+
+    .cards-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 12px;
+      text-align: left;
+    }
+
+    .prompt-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      padding: 14px 16px;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .prompt-card:hover {
+      background: var(--bg-card);
+      border-color: var(--gold-500);
+      transform: translateY(-2px);
+    }
+
+    .prompt-card-title {
+      font-size: 13.5px;
+      font-weight: 600;
+      color: var(--gold-200);
       margin-bottom: 4px;
     }
 
-    .bot hr {
+    .prompt-card-desc {
+      font-size: 12px;
+      color: var(--text-dim);
+      line-height: 1.4;
+    }
+
+    /* Mensajes */
+    .message-row {
+      display: flex;
+      gap: 16px;
+      width: 100%;
+      line-height: 1.65;
+    }
+
+    .message-row.user {
+      justify-content: flex-end;
+    }
+
+    .msg-avatar {
+      width: 32px;
+      height: 32px;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 13px;
+      font-weight: bold;
+      flex-shrink: 0;
+    }
+
+    .message-row.user .msg-avatar {
+      background: var(--gold-700);
+      color: var(--gold-50);
+      order: 2;
+    }
+
+    .message-row.bot .msg-avatar {
+      background: linear-gradient(135deg, var(--gold-600), var(--gold-400));
+      color: #111;
+      order: 1;
+    }
+
+    .msg-body {
+      max-width: 82%;
+      font-size: 14.5px;
+      color: var(--text-primary);
+    }
+
+    .message-row.user .msg-body {
+      background: var(--user-bubble);
+      padding: 12px 18px;
+      border-radius: 14px;
+      border-top-right-radius: 2px;
+      border: 1px solid var(--border-subtle);
+      order: 1;
+    }
+
+    .message-row.bot .msg-body {
+      background: transparent;
+      padding: 4px 0;
+      order: 2;
+      width: 100%;
+    }
+
+    /* Render Markdown & Tablas Doradas */
+    .msg-body h1, .msg-body h2, .msg-body h3 {
+      color: var(--gold-300);
+      margin: 18px 0 10px 0;
+      font-weight: 700;
+    }
+    .msg-body h1 { font-size: 20px; border-bottom: 1px solid var(--border-subtle); padding-bottom: 6px; }
+    .msg-body h2 { font-size: 17px; }
+    .msg-body h3 { font-size: 15px; }
+
+    .msg-body p { margin-bottom: 12px; }
+    .msg-body p:last-child { margin-bottom: 0; }
+
+    .msg-body strong {
+      color: var(--gold-200);
+      font-weight: 600;
+    }
+
+    .msg-body ul, .msg-body ol {
+      margin: 8px 0 14px 22px;
+    }
+
+    .msg-body li {
+      margin-bottom: 6px;
+    }
+
+    .msg-body hr {
       border: 0;
       height: 1px;
-      background: var(--border-color);
-      margin: 16px 0;
+      background: var(--border-subtle);
+      margin: 20px 0;
     }
 
-    .bot a {
-      color: var(--accent);
-      text-decoration: underline;
-    }
-
-    /* Tablas comparativas */
-    .bot table {
+    /* Tablas estilo Cannes Benchmark */
+    .msg-body table {
       width: 100%;
       border-collapse: collapse;
-      margin: 14px 0;
+      margin: 16px 0;
       font-size: 13.5px;
-      background: #0f172a;
+      background: var(--bg-surface);
       border-radius: 8px;
       overflow: hidden;
-      border: 1px solid var(--border-color);
+      border: 1px solid var(--border-subtle);
     }
 
-    .bot th, .bot td {
-      padding: 10px 14px;
+    .msg-body th, .msg-body td {
+      padding: 12px 14px;
       text-align: left;
-      border: 1px solid var(--border-color);
+      border: 1px solid var(--border-subtle);
     }
 
-    .bot th {
-      background: #1e293b;
-      color: var(--accent);
+    .msg-body th {
+      background: #15161e;
+      color: var(--gold-400);
       font-weight: 600;
+      border-bottom: 2px solid var(--gold-600);
     }
 
-    .bot tr:nth-child(even) {
-      background: #131d31;
+    .msg-body tr:nth-child(even) {
+      background: rgba(255, 255, 255, 0.02);
     }
 
-    .input-box {
+    .msg-body tr:hover {
+      background: rgba(241, 166, 15, 0.04);
+    }
+
+    /* =========================================
+       INPUT BAR (Flotante LibreChat)
+       ========================================= */
+    .input-container {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      padding: 0 20px 24px 20px;
+      background: linear-gradient(180deg, transparent 0%, var(--bg-main) 35%);
       display: flex;
-      gap: 12px;
-      margin-top: 14px;
+      flex-direction: column;
+      align-items: center;
     }
 
-    input {
+    .input-box-wrapper {
+      width: 100%;
+      max-width: 840px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: 14px;
+      padding: 6px 12px 6px 16px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+
+    .input-box-wrapper:focus-within {
+      border-color: var(--gold-500);
+      box-shadow: 0 0 0 2px rgba(241, 166, 15, 0.15);
+    }
+
+    #query-input {
       flex: 1;
-      padding: 15px;
-      border-radius: 10px;
-      border: 1px solid var(--border-color);
-      background: var(--bg-panel);
-      color: #ffffff;
+      background: transparent;
+      border: none;
+      color: var(--text-primary);
       font-size: 15px;
       outline: none;
-      transition: border-color 0.2s;
+      padding: 8px 0;
     }
 
-    input:focus {
-      border-color: var(--accent);
+    #query-input::placeholder {
+      color: var(--text-dim);
     }
 
-    button {
-      background: var(--accent);
-      color: #090d16;
+    .btn-send {
+      width: 36px;
+      height: 36px;
+      border-radius: 8px;
+      background: var(--gold-500);
+      color: #111217;
       border: none;
-      padding: 0 26px;
-      border-radius: 10px;
-      font-weight: 600;
+      display: flex;
+      align-items: center;
+      justify-content: center;
       cursor: pointer;
-      font-size: 15px;
-      transition: background 0.2s, opacity 0.2s;
+      font-weight: bold;
+      transition: background 0.2s, transform 0.1s;
     }
 
-    button:hover {
-      background: #7dd3fc;
+    .btn-send:hover {
+      background: var(--gold-400);
     }
 
-    button:disabled {
-      opacity: 0.5;
+    .btn-send:disabled {
+      background: var(--bg-card);
+      color: var(--text-dim);
       cursor: not-allowed;
+    }
+
+    .disclaimer {
+      font-size: 11.5px;
+      color: var(--text-dim);
+      margin-top: 8px;
+    }
+
+    /* Scrollbar personalizada */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: var(--border-subtle);
+      border-radius: 3px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: var(--gold-700);
     }
   </style>
 </head>
 <body>
-  <div class="container">
-    <header>
-      <h1>Festival AI</h1>
-      <p>Benchmarking de Festivales Publicitarios y Análisis de Casos</p>
-    </header>
 
-    <div id="chat">
-      <div class="msg bot">Base de datos cargada. Puedes consultar patrones, categorías o solicitar comparativas directas entre piezas ganadoras y shortlists.</div>
+  <!-- SIDEBAR -->
+  <aside id="sidebar">
+    <div class="sidebar-header">
+      <button class="btn-new-chat" id="btn-new-chat">
+        <span>+</span> Nuevo análisis
+      </button>
     </div>
 
-    <form class="input-box" id="form">
-      <input type="text" id="pregunta" placeholder="Escribe tu consulta estratégica..." required autocomplete="off">
-      <button type="submit" id="btn">Enviar</button>
-    </form>
-  </div>
+    <div class="chat-history">
+      <div class="history-item active">🏆 Cannes 2020: GP vs Shortlist</div>
+      <div class="history-item">🏷️ Brand Purpose Audit</div>
+      <div class="history-item">🚗 Outdoor: Nissan vs Autos</div>
+      <div class="history-item">💡 Tensión cultural retail</div>
+    </div>
+
+    <div class="sidebar-footer">
+      <div class="user-badge">
+        <div class="user-avatar">J</div>
+        <span>Jurado Creativo</span>
+      </div>
+      <span style="font-size: 11px; color: var(--gold-500); font-weight: 600;">300+ Casos</span>
+    </div>
+  </aside>
+
+  <!-- MAIN VIEW -->
+  <main>
+    <!-- TOP BAR -->
+    <div class="top-bar">
+      <div class="top-bar-left">
+        <button class="btn-toggle-sidebar" id="btn-toggle-sidebar" title="Alternar barra lateral">☰</button>
+        <div class="model-selector-btn">
+          <div class="model-dot"></div>
+          <span>Festival AI Engine</span>
+        </div>
+      </div>
+      <div style="font-size: 12px; color: var(--gold-300); font-weight: 600;">
+        Cannes Lions & Eurobest Benchmark
+      </div>
+    </div>
+
+    <!-- CHAT THREAD -->
+    <div id="chat-thread">
+      <div class="thread-inner" id="thread-inner">
+        
+        <!-- Welcome Screen Inicial (LibreChat Style) -->
+        <div class="welcome-screen" id="welcome-screen">
+          <div class="welcome-title">Festival AI</div>
+          <div class="welcome-subtitle">
+            Auditoría estratégica, autopsias de boards y benchmarking entre Grand Prix y Shortlists.
+          </div>
+
+          <div class="cards-grid">
+            <div class="prompt-card" onclick="lanzarPrompt('Haz un versus estratégico entre las 5 mejores Grand Prix y 5 Shortlists de 2020 en Brand Purpose')">
+              <div class="prompt-card-title">⚖️ Grand Prix vs. Shortlist</div>
+              <div class="prompt-card-desc">Contrasta por qué unas cruzaron la línea y otras quedaron en mención.</div>
+            </div>
+
+            <div class="prompt-card" onclick="lanzarPrompt('¿Por qué Contract for Change de AB InBev ganó Grand Prix y qué le faltó a las no ganadoras de la misma categoría?')">
+              <div class="prompt-card-title">🔍 Autopsia de un Caso</div>
+              <div class="prompt-card-desc">Desmenuza "Contract for Change" frente a piezas reactivas.</div>
+            </div>
+
+            <div class="prompt-card" onclick="lanzarPrompt('¿Qué patrones comunes tienen las piezas de Outdoor que no ganaron metal?')">
+              <div class="prompt-card-title">🚫 Patrones de Fracaso</div>
+              <div class="prompt-card-desc">Identifica clichés y superficialidad castigados por el jurado.</div>
+            </div>
+
+            <div class="prompt-card" onclick="lanzarPrompt('Tengo un brief de retail enfocado en sustentabilidad. ¿Qué fricción real deberíamos tocar para aspirar a Oro?')">
+              <div class="prompt-card-title">🎯 Desafío de Brief</div>
+              <div class="prompt-card-desc">Evalúa tensiones de negocio reales vs purpose-washing.</div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- FLOATING INPUT BAR -->
+    <div class="input-container">
+      <form class="input-box-wrapper" id="chat-form">
+        <input 
+          type="text" 
+          id="query-input" 
+          placeholder="Plantea un brief, un territorio o pide un versus comparativo..." 
+          autocomplete="off" 
+          required 
+        />
+        <button type="submit" class="btn-send" id="btn-send" title="Enviar consulta">
+          ↑
+        </button>
+      </form>
+      <div class="disclaimer">
+        Festival AI utiliza criterios de evaluación real de festivales publicitarios. Respuestas analíticas directas.
+      </div>
+    </div>
+  </main>
 
   <script>
-    const form = document.getElementById('form');
-    const input = document.getElementById('pregunta');
-    const chat = document.getElementById('chat');
-    const btn = document.getElementById('btn');
+    const threadInner = document.getElementById('thread-inner');
+    const chatThread = document.getElementById('chat-thread');
+    const chatForm = document.getElementById('chat-form');
+    const queryInput = document.getElementById('query-input');
+    const btnSend = document.getElementById('btn-send');
+    const welcomeScreen = document.getElementById('welcome-screen');
 
-    form.onsubmit = async (e) => {
+    const sidebar = document.getElementById('sidebar');
+    const btnToggleSidebar = document.getElementById('btn-toggle-sidebar');
+    const btnNewChat = document.getElementById('btn-new-chat');
+
+    // Alternar Sidebar
+    btnToggleSidebar.onclick = () => {
+      sidebar.classList.toggle('collapsed');
+    };
+
+    // Nuevo Chat
+    btnNewChat.onclick = () => {
+      threadInner.innerHTML = '';
+      if (welcomeScreen) threadInner.appendChild(welcomeScreen);
+      queryInput.value = '';
+    };
+
+    function lanzarPrompt(texto) {
+      queryInput.value = texto;
+      chatForm.dispatchEvent(new Event('submit'));
+    }
+
+    chatForm.onsubmit = async (e) => {
       e.preventDefault();
-      const txt = input.value.trim();
+      const txt = queryInput.value.trim();
       if (!txt) return;
 
-      const userDiv = document.createElement('div');
-      userDiv.className = 'msg user';
-      userDiv.innerText = txt;
-      chat.appendChild(userDiv);
+      // Ocultar pantalla de bienvenida
+      if (welcomeScreen && welcomeScreen.parentNode) {
+        welcomeScreen.remove();
+      }
 
-      input.value = '';
-      btn.disabled = true;
-      chat.scrollTop = chat.scrollHeight;
+      // 1. Render mensaje de Usuario
+      const userRow = document.createElement('div');
+      userRow.className = 'message-row user';
+      userRow.innerHTML = `
+        <div class="msg-avatar">TÚ</div>
+        <div class="msg-body">${escapeHtml(txt)}</div>
+      `;
+      threadInner.appendChild(userRow);
 
-      const loading = document.createElement('div');
-      loading.className = 'msg bot';
-      loading.innerText = 'Analizando base de datos y generando comparativa...';
-      chat.appendChild(loading);
-      chat.scrollTop = chat.scrollHeight;
+      queryInput.value = '';
+      btnSend.disabled = true;
+      chatThread.scrollTop = chatThread.scrollHeight;
+
+      // 2. Render mensaje de Carga del Bot
+      const botRow = document.createElement('div');
+      botRow.className = 'message-row bot';
+      botRow.innerHTML = `
+        <div class="msg-avatar">★</div>
+        <div class="msg-body" id="loading-bot" style="color: var(--gold-300);">
+          Evaluando casos y contrastando boards en la base de datos...
+        </div>
+      `;
+      threadInner.appendChild(botRow);
+      chatThread.scrollTop = chatThread.scrollHeight;
 
       try {
         const res = await fetch('/api/chat', {
@@ -265,21 +704,31 @@
         try {
           data = JSON.parse(rawText);
         } catch {
-          throw new Error('El servidor excedió el tiempo de respuesta o devolvió un formato no válido.');
+          throw new Error('El servidor excedió el tiempo de respuesta o devolvió un formato inválido.');
         }
 
+        const botBody = botRow.querySelector('.msg-body');
         if (!res.ok) {
-          loading.innerText = `Error (${res.status}): ${data.error || 'Fallo en la consulta.'}`;
+          botBody.innerHTML = `<span style="color: #ef4444;">Error (${res.status}): ${data.error || 'Fallo en la consulta.'}</span>`;
         } else {
-          loading.innerHTML = marked.parse(data.respuesta || 'Sin respuesta.');
+          botBody.innerHTML = marked.parse(data.respuesta || 'Sin respuesta.');
         }
       } catch (err) {
-        loading.innerText = `Error: ${err.message}`;
+        const botBody = botRow.querySelector('.msg-body');
+        botBody.innerHTML = `<span style="color: #ef4444;">Error: ${err.message}</span>`;
       }
 
-      btn.disabled = false;
-      chat.scrollTop = chat.scrollHeight;
+      btnSend.disabled = false;
+      chatThread.scrollTop = chatThread.scrollHeight;
     };
+
+    function escapeHtml(string) {
+      return String(string)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
   </script>
 </body>
 </html>
