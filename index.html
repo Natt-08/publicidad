@@ -149,7 +149,7 @@
       font-size: 12px;
     }
 
-    /* MAIN CHAT */
+    /* MAIN CONTAINER */
     main {
       flex: 1;
       display: flex;
@@ -347,7 +347,7 @@
       width: 100%;
     }
 
-    /* Markdown Formats & Tables */
+    /* Formato Markdown, Links y Tablas */
     .msg-body h1, .msg-body h2, .msg-body h3 {
       color: var(--gold-300);
       margin: 18px 0 10px 0;
@@ -363,6 +363,20 @@
     .msg-body li { margin-bottom: 6px; }
     .msg-body hr { border: 0; height: 1px; background: var(--border-subtle); margin: 20px 0; }
 
+    /* Estilo de Enlaces */
+    .msg-body a {
+      color: var(--gold-400);
+      text-decoration: none;
+      font-weight: 600;
+      border-bottom: 1px dashed var(--gold-500);
+      transition: all 0.2s;
+    }
+    .msg-body a:hover {
+      color: var(--gold-200);
+      border-bottom-style: solid;
+    }
+
+    /* Tablas */
     .msg-body table {
       width: 100%;
       border-collapse: collapse;
@@ -458,7 +472,7 @@
       margin-top: 8px;
     }
 
-    /* MODAL DE CONFIGURACIÓN */
+    /* MODAL SETTINGS */
     .modal-overlay {
       position: fixed;
       inset: 0;
@@ -566,18 +580,18 @@
         <div class="welcome-screen" id="welcome-screen">
           <div class="welcome-title">Festival AI</div>
           <div class="welcome-subtitle">
-            Auditoría de boards, benchmarking y detección de brechas estratégicas entre ganadoras y casos descartados.
+            Auditoría de boards, enlaces directos, benchmarking y detección de brechas estratégicas.
           </div>
 
           <div class="cards-grid">
-            <div class="prompt-card" onclick="lanzarPrompt('Dame más detalle y autopsia estratégica sobre Stay Home of the Whopper')">
-              <div class="prompt-card-title">🍔 Stay Home of the Whopper</div>
-              <div class="prompt-card-desc">Revisa el board real: Couch Potatriot y entrega de Whoppers.</div>
+            <div class="prompt-card" onclick="lanzarPrompt('Dame la autopsia estratégica y el link del board de BUY WITH YOUR TIME de IKEA')">
+              <div class="prompt-card-title">⏰ IKEA: Buy with your time</div>
+              <div class="prompt-card-desc">Revisa el caso, el resultado de metales y el link de su board.</div>
             </div>
 
-            <div class="prompt-card" onclick="lanzarPrompt('Analiza BUY WITH YOUR TIME de IKEA: ¿por qué ganó Oro en Direct pero NO GANO en Titanium?')">
-              <div class="prompt-card-title">⏰ IKEA: Buy with your time</div>
-              <div class="prompt-card-desc">Contrasta mecánica promocional frente al descarte en Titanium.</div>
+            <div class="prompt-card" onclick="lanzarPrompt('¿Qué campañas usaron gaming como medio? Pásame sus nombres y links si están disponibles')">
+              <div class="prompt-card-title">🎮 Gaming & eSports</div>
+              <div class="prompt-card-desc">Contrasta piezas ganadoras contra eliminadas y pide sus links.</div>
             </div>
 
             <div class="prompt-card" onclick="lanzarPrompt('Haz un versus en Brand Purpose 2020: 3 Grand Prix frente a 3 que NO GANARON')">
@@ -585,9 +599,9 @@
               <div class="prompt-card-desc">Tabla comparativa de transformación sistémica vs postureo.</div>
             </div>
 
-            <div class="prompt-card" onclick="lanzarPrompt('¿Por qué YOUR PLASTIC DIET de WWF quedó en shortlist masivo pero no convirtió a Grand Prix?')">
-              <div class="prompt-card-title">💳 WWF: Your Plastic Diet</div>
-              <div class="prompt-card-desc">Data visualisation impecable vs falta de cambio regulatorio real.</div>
+            <div class="prompt-card" onclick="lanzarPrompt('Analiza UNTOUCHABLES de Eva Clinic: mecánica térmica, metales y link del caso')">
+              <div class="prompt-card-title">🔬 Termografía: The Untouchables</div>
+              <div class="prompt-card-desc">Cribado térmico para superar barreras culturales.</div>
             </div>
           </div>
         </div>
@@ -607,7 +621,7 @@
         <button type="submit" class="btn-send" id="btn-send" title="Enviar consulta">↑</button>
       </form>
       <div class="disclaimer">
-        Festival AI audita registros reales de festivales publicitarios. Criterio de jurado estricto.
+        Festival AI audita registros reales de festivales publicitarios con acceso a boards y enlaces de archivo.
       </div>
     </div>
   </main>
@@ -632,7 +646,7 @@
         <label for="input-apikey">Tu API Key Personal:</label>
         <input type="password" id="input-apikey" class="form-control" placeholder="Pega tu clave aquí..." />
         <div style="font-size: 11.5px; color: var(--text-dim); margin-top: 6px;">
-          Se guarda exclusivamente en tu navegador (localStorage). Si lo dejas vacío, usa la clave del servidor.
+          Se guarda exclusivamente en tu navegador (localStorage).
         </div>
       </div>
 
@@ -663,6 +677,9 @@
     const inputApiKey = document.getElementById('input-apikey');
     const selectProvider = document.getElementById('select-provider');
     const labelSettings = document.getElementById('label-settings');
+
+    // Memoria local de la conversación
+    let chatHistory = [];
 
     function syncConfig() {
       const k = localStorage.getItem('festival_user_key') || '';
@@ -703,6 +720,7 @@
 
     btnNewChat.onclick = () => {
       threadInner.innerHTML = '';
+      chatHistory = [];
       if (welcomeScreen) threadInner.appendChild(welcomeScreen);
       queryInput.value = '';
     };
@@ -753,7 +771,10 @@
             'x-user-key': userKey,
             'x-user-provider': userProv
           },
-          body: JSON.stringify({ mensaje: txt })
+          body: JSON.stringify({ 
+            mensaje: txt,
+            historial: chatHistory
+          })
         });
 
         const rawText = await res.text();
@@ -769,6 +790,10 @@
           botBody.innerHTML = `<span style="color: #ef4444;">Error (${res.status}): ${data.error || 'Fallo en la consulta.'}</span>`;
         } else {
           botBody.innerHTML = marked.parse(data.respuesta || 'Sin respuesta.');
+          
+          // Guardar en la memoria conversacional
+          chatHistory.push({ role: 'user', content: txt });
+          chatHistory.push({ role: 'assistant', content: data.respuesta });
         }
       } catch (err) {
         const botBody = botRow.querySelector('.msg-body');
