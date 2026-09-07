@@ -15,16 +15,9 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'Falta el mensaje en la consulta.' });
   }
 
-  const headerKey = req.headers['x-user-key'];
-  const userKey = (typeof headerKey === 'string' && headerKey.trim().length > 0) ? headerKey.trim() : null;
-  const headerProvider = req.headers['x-user-provider'];
-
-  const apiKey = userKey || process.env.GEMINI_API_KEY || process.env.OPENROUTER_API_KEY;
-
+  const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) {
-    return res.status(400).json({ 
-      error: 'No se detectó ninguna API Key. Configura tu clave en el botón de ajustes (⚙️).' 
-    });
+    return res.status(500).json({ error: 'Falta configurar OPENROUTER_API_KEY en Vercel.' });
   }
 
   try {
@@ -34,7 +27,7 @@ export default async function handler(req, res) {
 
     const query = String(mensaje || '').toLowerCase();
 
-    // Filtros y scoring en memoria
+    // 1. Detección de intenciones y filtros en la consulta
     const aniosDetectados = query.match(/\b(20\d{2})\b/g) || [];
     const festivales = ['cannes', 'el ojo', 'clio', 'd&ad', 'eurobest', 'dubai lynx'].filter(f => query.includes(f));
     const categorias = ['outdoor', 'film', 'direct', 'print', 'pr', 'design', 'activation', 'purpose', 'media', 'creative data'].filter(c => query.includes(c));
@@ -45,6 +38,7 @@ export default async function handler(req, res) {
       .split(/\s+/)
       .filter(w => w.length > 3 && !palabrasIgnoradas.has(w));
 
+    // 2. Sistema de Scoring con conversión explícita a String
     const calificadas = todasLasCampanas.map(c => {
       let score = 0;
       const metales = String(c.METAL_SUMMARY || c.METAL || '').toLowerCase();
@@ -55,19 +49,29 @@ export default async function handler(req, res) {
       const anio = String(c.AÑO || c.ANIO || '');
       const board = String(c['ANALISIS BOARD'] || '').toLowerCase();
 
+      // Priorización de metales mayores
       if (metales.includes('grand prix')) score += 25;
       else if (metales.includes('gold')) score += 15;
       else if (metales.includes('silver')) score += 8;
       else if (metales.includes('bronze')) score += 4;
 
+      // Coincidencia por año
       if (aniosDetectados.length > 0) {
         if (aniosDetectados.includes(anio)) score += 30;
         else score -= 15;
       }
 
-      festivales.forEach(f => { if (fest.includes(f)) score += 20; });
-      categorias.forEach(catItem => { if (cat.includes(catItem)) score += 25; });
+      // Coincidencia por festival
+      festivales.forEach(f => {
+        if (fest.includes(f)) score += 20;
+      });
 
+      // Coincidencia por categoría
+      categorias.forEach(catItem => {
+        if (cat.includes(catItem)) score += 25;
+      });
+
+      // Coincidencia por palabras clave
       keywords.forEach(kw => {
         if (titulo.includes(kw)) score += 30;
         if (marca.includes(kw)) score += 25;
@@ -77,9 +81,11 @@ export default async function handler(req, res) {
       return { ...c, _score: score };
     });
 
+    // 3. Selección de las 40 campañas con mejor puntaje
     calificadas.sort((a, b) => b._score - a._score);
     const seleccionadas = calificadas.slice(0, 40);
 
+    // 4. Formateo de las piezas seleccionadas
     const baseSintetizada = seleccionadas.map((c, i) => {
       const titulo = String(c.Title || c.TITULO_PIEZA || 'S/T');
       const marca = String(c.MARCA || 'S/M');
@@ -100,7 +106,7 @@ export default async function handler(req, res) {
     }).join('\n');
 
     const promptSistema = `
-Eres un analista estratégico y jurado experto de festivales publicitarios (Cannes Lions).
+Eres un analista estratégico y jurado de Cannes Lions.
 Tienes sobre la mesa una selección optimizada de campañas relevantes:
 
 SELECCIÓN DE CASOS:
@@ -108,78 +114,43 @@ ${baseSintetizada}
 
 PAUTAS DE RESPUESTA:
 1. Responde de forma directa, analítica y sin roleplay ni acotaciones teatrales.
-2. Si piden un versus:
+2. Si solicitan un versus:
    - Contrasta ganadoras (Grand Prix / Gold) frente a Shortlists / No ganadoras.
-   - Presenta la síntesis comparativa mediante una **Tabla Markdown** (Columnas: Caso & Marca | Metal | Tensión / Insight | Brecha Estratégica).
-   - Analiza qué hizo que una ganara (fricción real, utilidad o producto integrado) frente a la superficialidad de la no ganadora.
-3. Cita obligatoriamente los nombres y marcas exactas de la lista.
-4. Concluye con una pregunta estratégica orientada al reto planteado.
+   - Presenta la síntesis comparativa en una **Tabla Markdown** (Columnas: Caso & Marca | Metal | Tensión / Insight | Brecha Estratégica).
+   - Analiza la diferencia entre la transformación de negocio/cultural vs. la mera representación superficial.
+3. Cita nombres exactos de piezas y marcas presentes en el listado.
+4. Concluye con una pregunta estratégica orientada al brief o reto creativo.
 `;
 
-    let respuestaTexto = null;
-
-    const esGemini = headerProvider === 'gemini' || apiKey.startsWith('AIzaSy') || apiKey.startsWith('AQ');
-
-    if (esGemini) {
-      // Endpoint oficial actualizado a gemini-3.6-flash
-      const urlGemini = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`;
-      const payloadGemini = {
-        contents: [
-          {
-            role: 'user',
-            parts: [{ text: `${promptSistema}\n\nConsulta: ${mensaje}` }]
-          }
+    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://vercel.com",
+        "X-Title": "Festival AI"
+      },
+      body: JSON.stringify({
+        model: "minimax/minimax-m3:free",
+        messages: [
+          { role: "system", content: promptSistema },
+          { role: "user", content: mensaje }
         ],
-        generationConfig: {
-          temperature: 0.2,
-          maxOutputTokens: 1600
-        }
-      };
+        temperature: 0.2,
+        max_tokens: 1500
+      })
+    });
 
-      const resp = await fetch(urlGemini, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payloadGemini)
-      });
+    const data = await response.json();
 
-      const data = await resp.json();
-      if (!resp.ok) {
-        const err = data.error?.message || resp.statusText;
-        return res.status(500).json({ error: `Error de Google Gemini: ${err}` });
-      }
-      respuestaTexto = data.candidates?.[0]?.content?.parts?.[0]?.text;
-
-    } else {
-      // Llamada a OpenRouter como alternativa
-      const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-          'HTTP-Referer': 'https://vercel.com',
-          'X-Title': 'Festival AI'
-        },
-        body: JSON.stringify({
-          model: 'minimax/minimax-m3:free',
-          messages: [
-            { role: 'system', content: promptSistema },
-            { role: 'user', content: mensaje }
-          ],
-          temperature: 0.2,
-          max_tokens: 1600
-        })
-      });
-
-      const data = await resp.json();
-      if (!resp.ok) {
-        const err = data.error?.message || resp.statusText;
-        return res.status(500).json({ error: `Error de OpenRouter: ${err}` });
-      }
-      respuestaTexto = data.choices?.[0]?.message?.content;
+    if (!response.ok) {
+      const err = data.error?.message || response.statusText;
+      return res.status(500).json({ error: `Error OpenRouter: ${err}` });
     }
 
+    const respuestaTexto = data.choices?.[0]?.message?.content;
     if (!respuestaTexto) {
-      return res.status(500).json({ error: 'Respuesta vacía del proveedor. Reintenta la consulta.' });
+      return res.status(500).json({ error: 'Respuesta vacía del proveedor.' });
     }
 
     return res.status(200).json({ respuesta: respuestaTexto });
