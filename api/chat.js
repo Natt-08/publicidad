@@ -5,20 +5,26 @@ export const config = {
   maxDuration: 60
 };
 
+// Función para normalizar texto (quita tildes, mayúsculas y caracteres raros)
 function normalizar(texto) {
-  return String(texto || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+  return String(texto || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
 }
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Método no permitido' });
 
   const { mensaje, historial = [] } = req.body || {};
-  if (!mensaje) return res.status(400).json({ error: 'Falta el mensaje.' });
+  if (!mensaje) return res.status(400).json({ error: 'Falta el mensaje en la consulta.' });
 
-  // 1. LLAVES DESDE VERCEL (Seguridad total, sin depender del frontend)
-  const keyGemini = process.env.GEMINI_API_KEY;
-  const keyGroq = process.env.GROQ_API_KEY;
-  const keyOpenRouter = process.env.OPENROUTER_API_KEY;
+  // 1. LLAVES DESDE VERCEL (Seguridad total)
+  // Las prioriza desde Vercel (process.env) pero acepta headers por si usas la interfaz web
+  const keyGemini = process.env.GEMINI_API_KEY || req.headers['x-gemini-key'];
+  const keyGroq = process.env.GROQ_API_KEY || req.headers['x-groq-key'];
+  const keyOpenRouter = process.env.OPENROUTER_API_KEY || req.headers['x-openrouter-key'];
   const estrategia = req.headers['x-strategy'] || 'auto'; 
 
   if (!keyGemini && !keyGroq && !keyOpenRouter) {
@@ -75,7 +81,7 @@ export default async function handler(req, res) {
     });
 
     calificadas.sort((a, b) => b._score - a._score);
-    const seleccionadas = calificadas.slice(0, 12);
+    const seleccionadas = calificadas.slice(0, 12); // Tomamos el TOP 12 más relevante
 
     // 5. CONTEXTO DINÁMICO (Contexto profundo para el top 3)
     const baseSintetizada = seleccionadas.map((c, i) => {
@@ -86,6 +92,7 @@ export default async function handler(req, res) {
       const linkBoard = c['Board image'] || c.URL || c.LINK || c.board_image || 'No disponible';
       
       let board = String(c['ANALISIS BOARD'] || '').replace(/\s+/g, ' ').trim();
+      // Lectura profunda de 1500 caracteres para los 3 mejores resultados, lectura rápida para el resto.
       const maxChars = i < 3 ? 1500 : 300; 
       if (board.length > maxChars) board = board.substring(0, maxChars) + '...';
 
@@ -109,7 +116,7 @@ REGLAS ESTRICTAS (ANTI-ALUCINACIONES):
 3. Si piden enlaces, usa Markdown: [Ver Board Oficial](URL).
 `;
 
-    // 6. PREPARACIÓN DE HISTORIAL (Máximo 30 turnos)
+    // 6. PREPARACIÓN DE HISTORIAL (Memoria de 30 mensajes)
     const historialLargo = historial.slice(-30);
     const mensajesOpenAI = [
       { role: 'system', content: promptSistema },
@@ -117,16 +124,18 @@ REGLAS ESTRICTAS (ANTI-ALUCINACIONES):
       { role: 'user', content: mensaje }
     ];
     
+    // Traducción de formato para Gemini
     const historialGemini = historialLargo.map(msg => ({
       role: msg.role === 'assistant' ? 'model' : 'user',
       parts: [{ text: msg.content }]
     }));
+    
     const payloadGemini = {
       contents: [...historialGemini, { role: 'user', parts: [{ text: `${promptSistema}\n\nConsulta actual: ${mensaje}` }] }],
       generationConfig: { temperature: 0.2, maxOutputTokens: 2000 }
     };
 
-    // 7. FUNCIONES DE LLAMADA (MOTORES)
+    // 7. FUNCIONES DE LLAMADA A LAS IA
     async function llamarGemini() {
       if (!keyGemini) throw new Error('Key Gemini ausente');
       const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${keyGemini}`, {
@@ -151,15 +160,26 @@ REGLAS ESTRICTAS (ANTI-ALUCINACIONES):
     async function llamarOpenRouter() {
       if (!keyOpenRouter) throw new Error('Key OpenRouter ausente');
       const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST', headers: { 'Authorization': `Bearer ${keyOpenRouter}`, 'Content-Type': 'application/json', 'HTTP-Referer': 'https://festival-ai.vercel.app', 'X-Title': 'Festival AI' },
-        body: JSON.stringify({ model: 'meta-llama/llama-3.1-8b-instruct:free', messages: mensajesOpenAI, temperature: 0.35, presence_penalty: 0.4, max_tokens: 2000 })
+        method: 'POST', headers: { 
+          'Authorization': `Bearer ${keyOpenRouter}`, 
+          'Content-Type': 'application/json', 
+          'HTTP-Referer': 'https://festival-ai.vercel.app', 
+          'X-Title': 'Festival AI' 
+        },
+        body: JSON.stringify({ 
+          model: 'openrouter/free', // <--- EL ROUTER AUTOMÁTICO GRATUITO
+          messages: mensajesOpenAI, 
+          temperature: 0.35, 
+          presence_penalty: 0.4, 
+          max_tokens: 2000 
+        })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error?.message || 'Error OpenRouter');
       return data.choices?.[0]?.message?.content;
     }
 
-    // 8. CASCADA DE RUTEO (Waterfall)
+    // 8. CASCADA DE RUTEO (WATERFALL)
     let respuestaTexto = null;
 
     if (estrategia === 'auto') {
@@ -174,13 +194,17 @@ REGLAS ESTRICTAS (ANTI-ALUCINACIONES):
           try {
             respuestaTexto = await llamarOpenRouter();
           } catch (err3) {
-            throw new Error(`Cascada colapsada. Error final (OpenRouter): ${err3.message}`);
+            throw new Error(`Cascada colapsada. Gemini y Groq fallaron. Error final (OpenRouter): ${err3.message}`);
           }
         }
       }
-    } else if (estrategia === 'gemini') { respuestaTexto = await llamarGemini(); }
-    else if (estrategia === 'groq') { respuestaTexto = await llamarGroq(); }
-    else if (estrategia === 'openrouter') { respuestaTexto = await llamarOpenRouter(); }
+    } else if (estrategia === 'gemini') { 
+      respuestaTexto = await llamarGemini(); 
+    } else if (estrategia === 'groq') { 
+      respuestaTexto = await llamarGroq(); 
+    } else if (estrategia === 'openrouter') { 
+      respuestaTexto = await llamarOpenRouter(); 
+    }
 
     if (!respuestaTexto) return res.status(500).json({ error: 'Respuesta vacía del proveedor.' });
 
