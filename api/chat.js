@@ -1,6 +1,10 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
 
+export const config = {
+  maxDuration: 60 // Pide a Vercel el máximo tiempo permitido
+};
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Método no permitido' });
@@ -21,7 +25,6 @@ export default async function handler(req, res) {
     const fileData = readFileSync(filePath, 'utf8');
     const todasLasCampanas = JSON.parse(fileData);
 
-    // Formato sintetizado (~12k tokens)
     const baseSintetizada = todasLasCampanas.map((c, i) => {
       const metal = (c.METAL || c.metal || 'SHORTLIST / NO GANADORA').toUpperCase();
       const pieza = c.TITULO_PIEZA || c.titulo_pieza || 'Sin título';
@@ -35,23 +38,22 @@ export default async function handler(req, res) {
     }).join('\n');
 
     const promptSistema = `
-Eres un analista estratégico y director creativo senior de festivales como Cannes Lions.
-Tienes sobre la mesa un archivo de 300 campañas (metales pesados frente a shortlists y no ganadoras):
+Eres un analista estratégico y jurado experto de Cannes Lions.
+Tienes un registro de 300 campañas (Grand Prix / Oros frente a Shortlists y no ganadoras):
 
 === BASE DE CAMPAÑAS ===
 ${baseSintetizada}
 ========================
 
 INSTRUCCIONES CLAVE:
-1. PROHIBIDO EL TEATRO O ROLEPLAY: Cero acotaciones entre paréntesis (tipo *te miro*, *suspiro*). Habla como un colega creativo directo, reflexivo y certero.
-2. ANÁLISIS DE FONDO:
-   - Diferencia la fricción cultural real de una ganadora frente al cliché bienintencionado de una no ganadora.
-   - Explica si la idea resolvió una tensión del negocio o si fue solo cosmética.
-3. EVIDENCIA CONCRETA: Cita obligatoriamente al menos 2 piezas ganadoras y 2 piezas no ganadoras de la lista (con marcas y nombres exactos) para contrastarlas cara a cara.
-4. Cierra siempre con una pregunta estratégica abierta para seguir explorando el reto.
+1. Cero roleplay o acotaciones teatrales. Ve al grano con criterio estratégico puro.
+2. Si piden un versus de 5 vs 5:
+   - Toma 5 casos con [GRAND PRIX] y 5 casos con [SHORTLIST / NO GANADORA] de la lista.
+   - Contrasta qué separó el éxito del fracaso en cada duelo: la tensión real vs el cliché, el rol del producto y la audacia del craft.
+3. Cita obligatoriamente los nombres exactos de las piezas y marcas presentes en el archivo.
+4. Concluye devolviendo una pregunta estratégica sobre el reto creativo actual.
 `;
 
-    // Llamada con soporte oficial de razonamiento de OpenRouter
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -66,9 +68,8 @@ INSTRUCCIONES CLAVE:
           { role: "system", content: promptSistema },
           { role: "user", content: mensaje }
         ],
-        reasoning: { enabled: true },
-        temperature: 0.4,
-        max_tokens: 2048
+        temperature: 0.3,
+        max_tokens: 2500
       })
     });
 
@@ -79,7 +80,13 @@ INSTRUCCIONES CLAVE:
       return res.status(500).json({ error: `Error de OpenRouter: ${err}` });
     }
 
-    const respuestaTexto = data.choices?.[0]?.message?.content || 'No se obtuvo respuesta del modelo.';
+    const choice = data.choices?.[0]?.message;
+    const respuestaTexto = choice?.content || (typeof choice?.reasoning === 'string' ? choice.reasoning : null);
+
+    if (!respuestaTexto) {
+      return res.status(500).json({ error: 'El proveedor devolvió una respuesta vacía. Reintenta la consulta.' });
+    }
+
     return res.status(200).json({ respuesta: respuestaTexto });
 
   } catch (error) {
