@@ -19,7 +19,6 @@ export default async function handler(req, res) {
   const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
   try {
-    // 1. Cargar las 300 campañas completas
     const filePath = join(process.cwd(), 'campanas.json');
     const fileData = readFileSync(filePath, 'utf8');
     const todasLasCampanas = JSON.parse(fileData);
@@ -38,9 +37,8 @@ TU MISIÓN EN ESTE PING-PONG CREATIVO:
 4. Si el usuario te presenta un reto o brief, dale giros conceptuales y cierra siempre devolviendo la pelota con una pregunta clave.
 `;
 
-    // 2. Modelo con ventana masiva de tokens
     const model = genAI.getGenerativeModel({ 
-      model: 'gemini-1.5-flash',
+      model: 'gemini-2.0-flash',
       systemInstruction: promptSistema
     });
 
