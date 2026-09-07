@@ -2,7 +2,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 
 export const config = {
-  maxDuration: 60 // Pide a Vercel el máximo tiempo permitido
+  maxDuration: 60
 };
 
 export default async function handler(req, res) {
@@ -25,33 +25,43 @@ export default async function handler(req, res) {
     const fileData = readFileSync(filePath, 'utf8');
     const todasLasCampanas = JSON.parse(fileData);
 
+    // Mapeo exacto basado en las claves reales de tu JSON
     const baseSintetizada = todasLasCampanas.map((c, i) => {
-      const metal = (c.METAL || c.metal || 'SHORTLIST / NO GANADORA').toUpperCase();
-      const pieza = c.TITULO_PIEZA || c.titulo_pieza || 'Sin título';
+      const titulo = c.Title || c.TITULO_PIEZA || c.titulo || 'Sin título';
       const marca = c.MARCA || c.marca || 'Sin marca';
-      const fest = `${c.FESTIVAL || c.festival || 'Cannes'} ${c.ANIO || c.anio || ''}`.trim();
-      const ins = (c.insight_problema || c.insight || '').replace(/\s+/g, ' ').trim();
-      const ide = (c.idea_ejecucion || c.idea || '').replace(/\s+/g, ' ').trim();
-      const url = c.LINK || c.link || '';
+      const festival = c.FESTIVAL || 'CANNES';
+      const anio = c.AÑO || c.ANIO || c.anio || '';
+      const categorias = c.CATEGORIA_SUMMARY || c.CATEGORIA || '';
+      const metales = c.METAL_SUMMARY || c.METAL || 'NO GANO';
+      const analisis = (c['ANALISIS BOARD'] || c.insight_problema || '').replace(/\s+/g, ' ').trim();
+      const boardImg = c['Board image'] || '';
 
-      return `${i + 1}. [${metal}] "${pieza}" (${marca} - ${fest}) | INSIGHT: ${ins} | IDEA: ${ide}${url ? ` | LINK: ${url}` : ''}`;
+      // Determinar si tiene Grand Prix, Oro, Plata, Bronce o Shortlist
+      let maxMetal = 'SHORTLIST / NO GANO';
+      if (/grand prix/i.test(metales)) maxMetal = 'GRAND PRIX';
+      else if (/gold/i.test(metales)) maxMetal = 'GOLD';
+      else if (/silver/i.test(metales)) maxMetal = 'SILVER';
+      else if (/bronze/i.test(metales)) maxMetal = 'BRONZE';
+
+      return `${i + 1}. [${maxMetal}] "${titulo}" (${marca} - ${festival} ${anio}) | CAT: ${categorias} | METALES: ${metales} | ANÁLISIS: ${analisis}${boardImg ? ` | BOARD: ${boardImg}` : ''}`;
     }).join('\n');
 
     const promptSistema = `
-Eres un analista estratégico y jurado experto de Cannes Lions.
-Tienes un registro de 300 campañas (Grand Prix / Oros frente a Shortlists y no ganadoras):
+Eres un analista estratégico y jurado implacable de Cannes Lions.
+Tienes sobre la mesa un archivo de campañas reales con su información técnica, categorías, metales obtenidos y el desglose de su board de presentación:
 
-=== BASE DE CAMPAÑAS ===
+=== REGISTRO DE CAMPAÑAS ===
 ${baseSintetizada}
-========================
+============================
 
-INSTRUCCIONES CLAVE:
-1. Cero roleplay o acotaciones teatrales. Ve al grano con criterio estratégico puro.
-2. Si piden un versus de 5 vs 5:
-   - Toma 5 casos con [GRAND PRIX] y 5 casos con [SHORTLIST / NO GANADORA] de la lista.
-   - Contrasta qué separó el éxito del fracaso en cada duelo: la tensión real vs el cliché, el rol del producto y la audacia del craft.
-3. Cita obligatoriamente los nombres exactos de las piezas y marcas presentes en el archivo.
-4. Concluye devolviendo una pregunta estratégica sobre el reto creativo actual.
+INSTRUCCIONES DE RESPUESTA:
+1. Responde de forma directa, analítica y sin roleplay teatral.
+2. Sí tienes piezas con [GRAND PRIX] (como "CONTRACT FOR CHANGE" de ABInBev o "ACT FOR FOOD" de Carrefour) y piezas de shortlist/no ganadoras (como "BALLER DECORATOR" de City of Chicago).
+3. Si te piden un versus de categoría (ej. Outdoor, Film, Brand Purpose, etc.):
+   - Filtra los casos reales de la base que compitieron o encajan en esa disciplina.
+   - Contrasta qué separó al metal mayor (Grand Prix / Gold) de las no ganadoras: compara la fricción real, la transformación operativa/cultural vs la simple representación cosmética.
+   - Utiliza tablas comparativas en Markdown para sintetizar los contrastes y cita los nombres y marcas exactos.
+4. Concluye con una pregunta estratégica sobre el reto creativo que se esté resolviendo.
 `;
 
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -69,7 +79,7 @@ INSTRUCCIONES CLAVE:
           { role: "user", content: mensaje }
         ],
         temperature: 0.3,
-        max_tokens: 2500
+        max_tokens: 2800
       })
     });
 
@@ -84,7 +94,7 @@ INSTRUCCIONES CLAVE:
     const respuestaTexto = choice?.content || (typeof choice?.reasoning === 'string' ? choice.reasoning : null);
 
     if (!respuestaTexto) {
-      return res.status(500).json({ error: 'El proveedor devolvió una respuesta vacía. Reintenta la consulta.' });
+      return res.status(500).json({ error: 'Respuesta vacía del proveedor. Por favor reintenta.' });
     }
 
     return res.status(200).json({ respuesta: respuestaTexto });
