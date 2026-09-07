@@ -1,5 +1,6 @@
 import Groq from 'groq-sdk';
-import campanas from '../campanas.json' assert { type: 'json' };
+import fs from 'fs';
+import path from 'path';
 
 const groq = new Groq({
   apiKey: process.env.GROQ_API_KEY
@@ -16,16 +17,21 @@ export default async function handler(req, res) {
   }
 
   try {
+    // Lectura segura del archivo JSON en Vercel
+    const filePath = path.join(process.cwd(), 'campanas.json');
+    const fileData = fs.readFileSync(filePath, 'utf8');
+    const campanas = JSON.parse(fileData);
+
     const promptSistema = `
     Eres un estratega y director creativo senior experto en festivales publicitarios.
-    Tienes acceso a esta base exclusiva de campañas ganadoras:
+    Tienes acceso a esta base de campañas ganadoras:
     ${JSON.stringify(campanas)}
 
     INSTRUCCIONES:
-    1. Responde a la pregunta del usuario inspirándolo y resolviendo su duda de forma estratégica.
-    2. Cita OBLIGATORIAMENTE ejemplos específicos de la base de datos que se ajusten al brief o duda.
-    3. Para cada caso mencionado, incluye: Nombre de la pieza, Marca, Festival, Año, Metal, el insight/problema, la idea/ejecución y su LINK.
-    4. Habla con tono creativo, directo y motivador.
+    1. Responde a la pregunta del usuario con profundidad estratégica e inspiración.
+    2. Cita OBLIGATORIAMENTE ejemplos específicos de la base de datos que se ajusten a la consulta.
+    3. Para cada caso mencionado incluye: Nombre de la pieza, Marca, Festival, Año, Metal, el insight/problema, la idea/ejecución y su LINK.
+    4. Habla con tono creativo, directo y profesional.
     `;
 
     const chatCompletion = await groq.chat.completions.create({
@@ -38,9 +44,9 @@ export default async function handler(req, res) {
     });
 
     const respuesta = chatCompletion.choices[0]?.message?.content || "No pude generar una respuesta.";
-    res.status(200).json({ respuesta });
+    return res.status(200).json({ respuesta });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Error al conectar con Groq' });
+    console.error('Error detallado:', error);
+    return res.status(500).json({ error: error.message || 'Error interno del servidor' });
   }
 }
