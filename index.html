@@ -29,19 +29,41 @@
     * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
     body { background-color: var(--bg-main); color: var(--text-primary); height: 100vh; display: flex; overflow: hidden; }
     
-    aside { width: 260px; background: var(--bg-sidebar); border-right: 1px solid var(--border-subtle); display: flex; flex-direction: column; flex-shrink: 0; transition: margin-left 0.3s ease; z-index: 20; }
-    aside.collapsed { margin-left: -260px; }
-    .sidebar-header { padding: 14px; }
+    aside { width: 270px; background: var(--bg-sidebar); border-right: 1px solid var(--border-subtle); display: flex; flex-direction: column; flex-shrink: 0; transition: margin-left 0.3s ease; z-index: 20; }
+    aside.collapsed { margin-left: -270px; }
+    .sidebar-header { padding: 14px; display: flex; flex-direction: column; gap: 8px; }
     .btn-new-chat { width: 100%; display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: transparent; color: var(--gold-100); border: 1px solid var(--border-subtle); border-radius: 8px; font-size: 13.5px; font-weight: 500; cursor: pointer; transition: all 0.2s; }
     .btn-new-chat:hover { background: var(--bg-surface); border-color: var(--gold-500); color: var(--gold-400); }
+    
     .chat-history { flex: 1; overflow-y: auto; padding: 8px 12px; display: flex; flex-direction: column; gap: 4px; }
-    .history-item { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 6px; color: var(--text-muted); font-size: 13px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: all 0.15s; border-left: 3px solid transparent; }
+    
+    .history-item { 
+      display: flex; 
+      align-items: center; 
+      justify-content: space-between; 
+      padding: 8px 10px; 
+      border-radius: 6px; 
+      color: var(--text-muted); 
+      font-size: 13px; 
+      cursor: pointer; 
+      transition: all 0.15s; 
+      border-left: 3px solid transparent; 
+    }
     .history-item:hover { background: var(--bg-surface); color: var(--gold-100); }
     .history-item.active { background: var(--bg-surface); color: var(--gold-200); border-left-color: var(--gold-500); }
-    .sidebar-footer { padding: 12px 14px; border-top: 1px solid var(--border-subtle); display: flex; align-items: center; justify-content: space-between; }
-    .user-badge { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-muted); }
-    .user-avatar { width: 28px; height: 28px; border-radius: 50%; background: var(--gold-600); color: var(--gold-50); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 12px; }
     
+    .history-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; margin-right: 6px; }
+    .btn-del-chat { background: transparent; border: none; color: var(--text-dim); cursor: pointer; padding: 2px 5px; border-radius: 4px; font-size: 12px; }
+    .btn-del-chat:hover { color: #ef4444; background: rgba(239, 68, 68, 0.15); }
+    
+    .sidebar-footer { padding: 12px 14px; border-top: 1px solid var(--border-subtle); display: flex; flex-direction: column; gap: 10px; }
+    .sidebar-footer-row { display: flex; align-items: center; justify-content: space-between; }
+    .user-badge { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-muted); }
+    .user-avatar { width: 26px; height: 26px; border-radius: 50%; background: var(--gold-600); color: var(--gold-50); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 11px; }
+    
+    .btn-clear-all { width: 100%; background: transparent; border: 1px dashed var(--border-subtle); color: var(--text-dim); padding: 6px; border-radius: 6px; font-size: 11.5px; cursor: pointer; transition: all 0.2s; }
+    .btn-clear-all:hover { color: #ef4444; border-color: #ef4444; }
+
     main { flex: 1; display: flex; flex-direction: column; height: 100vh; background: var(--bg-main); position: relative; }
     .top-bar { height: 54px; padding: 0 20px; border-bottom: 1px solid var(--border-subtle); display: flex; align-items: center; justify-content: space-between; background: var(--bg-main); z-index: 10; }
     .top-bar-left { display: flex; align-items: center; gap: 12px; }
@@ -104,7 +126,10 @@
     </div>
     <div class="chat-history" id="sidebar-history"></div>
     <div class="sidebar-footer">
-      <div class="user-badge"><div class="user-avatar">J</div><span id="label-user">Jurado AI</span></div>
+      <div class="sidebar-footer-row">
+        <div class="user-badge"><div class="user-avatar">J</div><span>Jurado AI</span></div>
+      </div>
+      <button class="btn-clear-all" id="btn-clear-all" title="Eliminar todo el historial local">Borrar todas las sesiones</button>
     </div>
   </aside>
 
@@ -114,7 +139,7 @@
         <button class="btn-toggle-sidebar" id="btn-toggle-sidebar">☰</button>
         <div style="font-size: 13px; font-weight: 600; color: var(--gold-200);">Festival AI Engine</div>
       </div>
-      <button class="btn-settings" id="btn-open-settings">⚙️ Routing</button>
+      <button class="btn-settings" id="btn-open-settings">⚙️ Motor</button>
     </div>
 
     <div id="chat-thread">
@@ -126,26 +151,22 @@
         <input type="text" id="query-input" placeholder="Escribe tu consulta estratégica..." autocomplete="off" required />
         <button type="submit" class="btn-send" id="btn-send">↑</button>
       </form>
-      <div class="disclaimer">Memoria persistente: Guarda hasta 5 sesiones locales.</div>
+      <div class="disclaimer">Sesión con memoria contextual activa.</div>
     </div>
   </main>
 
-  <!-- MODAL SOLO DE ESTRATEGIA -->
   <div class="modal-overlay" id="modal-settings">
     <div class="modal-card">
       <div style="display:flex; justify-content:space-between; margin-bottom:16px;">
-        <h3 style="color:var(--gold-200);">Estrategia de Motor</h3>
+        <h3 style="color:var(--gold-200);">Ruteo de IA</h3>
         <button id="btn-close-settings" style="background:none; border:none; color:#fff; cursor:pointer;">&times;</button>
       </div>
-      <p style="font-size: 12.5px; color: var(--text-dim); margin-bottom: 16px;">
-        Las API Keys están seguras en el servidor (Vercel). Solo elige qué motor de IA prefieres usar.
-      </p>
-      <label style="font-size: 12.5px; font-weight: 600; color: var(--text-muted);">Ruteo de IA:</label>
+      <label style="font-size: 12.5px; font-weight: 600; color: var(--text-muted);">Selecciona la estrategia:</label>
       <select id="select-strategy" class="form-control">
         <option value="auto">🌟 Auto-Cascada (Gemini → Groq → OpenRouter)</option>
-        <option value="gemini">Forzar Google Gemini</option>
-        <option value="groq">Forzar Groq (Llama 3)</option>
-        <option value="openrouter">Forzar OpenRouter (Llama Free)</option>
+        <option value="gemini">Solo Gemini</option>
+        <option value="groq">Solo Groq</option>
+        <option value="openrouter">Solo OpenRouter</option>
       </select>
       <div style="text-align:right;">
         <button type="button" class="btn-save" id="btn-save-settings">Guardar</button>
@@ -171,19 +192,57 @@
       const sidebarContainer = document.getElementById('sidebar-history');
       sidebarContainer.innerHTML = '';
       [...chats].reverse().forEach(chat => {
-        const div = document.createElement('div');
-        div.className = `history-item ${chat.id === currentChatId ? 'active' : ''}`;
-        div.innerHTML = `💬 ${escapeHtml(chat.title)}`;
-        div.onclick = () => loadChat(chat.id);
-        sidebarContainer.appendChild(div);
+        const item = document.createElement('div');
+        item.className = `history-item ${chat.id === currentChatId ? 'active' : ''}`;
+        
+        const titleSpan = document.createElement('span');
+        titleSpan.className = 'history-title';
+        titleSpan.innerText = `💬 ${chat.title}`;
+        titleSpan.onclick = () => loadChat(chat.id);
+
+        const delBtn = document.createElement('button');
+        delBtn.className = 'btn-del-chat';
+        delBtn.innerText = '🗑️';
+        delBtn.title = 'Eliminar chat';
+        delBtn.onclick = (e) => {
+          e.stopPropagation();
+          deleteChat(chat.id);
+        };
+
+        item.appendChild(titleSpan);
+        item.appendChild(delBtn);
+        sidebarContainer.appendChild(item);
       });
     }
+
+    function deleteChat(id) {
+      let chats = getSavedChats();
+      chats = chats.filter(c => c.id !== id);
+      localStorage.setItem('festival_sessions', JSON.stringify(chats));
+      
+      if (currentChatId === id) {
+        currentChatId = null;
+        chatHistory = [];
+      }
+      renderSidebar(chats);
+      renderMessages();
+    }
+
+    document.getElementById('btn-clear-all').onclick = () => {
+      if (confirm('¿Deseas vaciar todo el historial de conversaciones guardadas?')) {
+        localStorage.removeItem('festival_sessions');
+        currentChatId = null;
+        chatHistory = [];
+        renderSidebar([]);
+        renderMessages();
+      }
+    };
 
     function renderWelcomeScreen() {
       return `
         <div class="welcome-screen" id="welcome-screen">
           <div class="welcome-title">Festival AI</div>
-          <div class="welcome-subtitle">Benchmarking e historial persistente (5 sesiones).</div>
+          <div class="welcome-subtitle">Benchmarking e historial persistente (5 sesiones con borrado).</div>
           <div class="cards-grid">
             <div class="prompt-card" onclick="lanzarPrompt('Analiza UNTOUCHABLES de Eva Clinic y pásame su link')">
               <div class="prompt-card-title">🔬 Termografía</div>
@@ -220,7 +279,7 @@
     function loadChat(id) {
       const chats = getSavedChats();
       const chat = chats.find(c => c.id === id);
-      if(!chat) return;
+      if (!chat) return;
       currentChatId = chat.id;
       chatHistory = chat.messages || [];
       renderSidebar(chats);
@@ -252,7 +311,7 @@
       const isFirstMessage = !currentChatId;
       if (isFirstMessage) {
         currentChatId = Date.now().toString();
-        const title = txt.length > 25 ? txt.substring(0, 25) + '...' : txt;
+        const title = txt.length > 22 ? txt.substring(0, 22) + '...' : txt;
         const chats = getSavedChats();
         chats.push({ id: currentChatId, title: title, messages: [] });
         saveChatsToLocal(chats);
@@ -265,7 +324,7 @@
 
       const botRow = document.createElement('div');
       botRow.className = 'message-row bot';
-      botRow.innerHTML = `<div class="msg-avatar">★</div><div class="msg-body" style="color: var(--gold-300);">Analizando base de datos...</div>`;
+      botRow.innerHTML = `<div class="msg-avatar">★</div><div class="msg-body" style="color: var(--gold-300);">Analizando expediente...</div>`;
       threadInner.appendChild(botRow);
       document.getElementById('chat-thread').scrollTop = document.getElementById('chat-thread').scrollHeight;
 
@@ -284,7 +343,7 @@
 
         const rawText = await res.text();
         let data;
-        try { data = JSON.parse(rawText); } catch { throw new Error('Timeout o formato no válido del servidor.'); }
+        try { data = JSON.parse(rawText); } catch { throw new Error('Timeout o formato incorrecto.'); }
 
         if (!res.ok) throw new Error(data.error || 'Fallo en la consulta.');
 
