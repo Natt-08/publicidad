@@ -1,10 +1,6 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
 
-export const config = {
-  maxDuration: 60
-};
-
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Método no permitido' });
@@ -25,43 +21,42 @@ export default async function handler(req, res) {
     const fileData = readFileSync(filePath, 'utf8');
     const todasLasCampanas = JSON.parse(fileData);
 
-    // Mapeo exacto basado en las claves reales de tu JSON
+    // Mapeo ultrarrápido y liviano
     const baseSintetizada = todasLasCampanas.map((c, i) => {
-      const titulo = c.Title || c.TITULO_PIEZA || c.titulo || 'Sin título';
-      const marca = c.MARCA || c.marca || 'Sin marca';
-      const festival = c.FESTIVAL || 'CANNES';
-      const anio = c.AÑO || c.ANIO || c.anio || '';
+      const titulo = c.Title || c.TITULO_PIEZA || 'S/T';
+      const marca = c.MARCA || 'S/M';
+      const festival = `${c.FESTIVAL || 'CANNES'} ${c.AÑO || c.ANIO || ''}`.trim();
       const categorias = c.CATEGORIA_SUMMARY || c.CATEGORIA || '';
       const metales = c.METAL_SUMMARY || c.METAL || 'NO GANO';
-      const analisis = (c['ANALISIS BOARD'] || c.insight_problema || '').replace(/\s+/g, ' ').trim();
-      const boardImg = c['Board image'] || '';
+      
+      // Resumen corto para máxima velocidad
+      let board = (c['ANALISIS BOARD'] || '').replace(/\s+/g, ' ').trim();
+      if (board.length > 200) board = board.substring(0, 200) + '...';
 
-      // Determinar si tiene Grand Prix, Oro, Plata, Bronce o Shortlist
-      let maxMetal = 'SHORTLIST / NO GANO';
+      let maxMetal = 'SHORTLIST';
       if (/grand prix/i.test(metales)) maxMetal = 'GRAND PRIX';
       else if (/gold/i.test(metales)) maxMetal = 'GOLD';
       else if (/silver/i.test(metales)) maxMetal = 'SILVER';
       else if (/bronze/i.test(metales)) maxMetal = 'BRONZE';
 
-      return `${i + 1}. [${maxMetal}] "${titulo}" (${marca} - ${festival} ${anio}) | CAT: ${categorias} | METALES: ${metales} | ANÁLISIS: ${analisis}${boardImg ? ` | BOARD: ${boardImg}` : ''}`;
+      return `${i + 1}. [${maxMetal}] "${titulo}" (${marca} - ${festival}) | CAT: ${categorias} | METALES: ${metales} | BOARD: ${board}`;
     }).join('\n');
 
     const promptSistema = `
-Eres un analista estratégico y jurado implacable de Cannes Lions.
-Tienes sobre la mesa un archivo de campañas reales con su información técnica, categorías, metales obtenidos y el desglose de su board de presentación:
+Eres un analista estratégico y jurado de Cannes Lions.
+Tienes un registro de campañas con metales (Grand Prix como "CONTRACT FOR CHANGE", Golds, Silvers, Bronzes) y Shortlists/No ganadoras.
 
-=== REGISTRO DE CAMPAÑAS ===
+BASE DE DATOS:
 ${baseSintetizada}
-============================
 
-INSTRUCCIONES DE RESPUESTA:
-1. Responde de forma directa, analítica y sin roleplay teatral.
-2. Sí tienes piezas con [GRAND PRIX] (como "CONTRACT FOR CHANGE" de ABInBev o "ACT FOR FOOD" de Carrefour) y piezas de shortlist/no ganadoras (como "BALLER DECORATOR" de City of Chicago).
-3. Si te piden un versus de categoría (ej. Outdoor, Film, Brand Purpose, etc.):
-   - Filtra los casos reales de la base que compitieron o encajan en esa disciplina.
-   - Contrasta qué separó al metal mayor (Grand Prix / Gold) de las no ganadoras: compara la fricción real, la transformación operativa/cultural vs la simple representación cosmética.
-   - Utiliza tablas comparativas en Markdown para sintetizar los contrastes y cita los nombres y marcas exactos.
-4. Concluye con una pregunta estratégica sobre el reto creativo que se esté resolviendo.
+PAUTAS ESTRICTAS:
+1. Responde de forma directa, analítica y concisa (máximo 400 palabras). Cero rodeos.
+2. Si te piden un versus de categoría (ej. Outdoor):
+   - Elige casos reales de la lista.
+   - Presenta la comparativa en una **Tabla Markdown** clara con columnas: Caso & Marca | Metal | Tensión / Insight | Brecha Estratégica.
+   - Detalla qué separó a las ganadoras de las no ganadoras.
+3. Cita nombres exactos de piezas y marcas.
+4. Cierra con una pregunta estratégica breve.
 `;
 
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -78,8 +73,8 @@ INSTRUCCIONES DE RESPUESTA:
           { role: "system", content: promptSistema },
           { role: "user", content: mensaje }
         ],
-        temperature: 0.3,
-        max_tokens: 2800
+        temperature: 0.2,
+        max_tokens: 1400
       })
     });
 
@@ -87,20 +82,18 @@ INSTRUCCIONES DE RESPUESTA:
 
     if (!response.ok) {
       const err = data.error?.message || response.statusText;
-      return res.status(500).json({ error: `Error de OpenRouter: ${err}` });
+      return res.status(500).json({ error: `Error OpenRouter: ${err}` });
     }
 
-    const choice = data.choices?.[0]?.message;
-    const respuestaTexto = choice?.content || (typeof choice?.reasoning === 'string' ? choice.reasoning : null);
-
+    const respuestaTexto = data.choices?.[0]?.message?.content;
     if (!respuestaTexto) {
-      return res.status(500).json({ error: 'Respuesta vacía del proveedor. Por favor reintenta.' });
+      return res.status(500).json({ error: 'Respuesta vacía del proveedor.' });
     }
 
     return res.status(200).json({ respuesta: respuestaTexto });
 
   } catch (error) {
-    console.error('Error general:', error);
-    return res.status(500).json({ error: error.message || 'Error interno del servidor' });
+    console.error('Error:', error);
+    return res.status(500).json({ error: error.message || 'Error interno' });
   }
 }
