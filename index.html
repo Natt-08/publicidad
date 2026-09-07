@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Festival AI - Casos Ganadores</title>
+  <title>Festival AI - Benchmarking Creativo</title>
   <style>
     * {
       box-sizing: border-box;
@@ -19,7 +19,7 @@
     }
     .container {
       width: 100%;
-      max-width: 760px;
+      max-width: 800px;
       display: flex;
       flex-direction: column;
       height: 92vh;
@@ -30,7 +30,7 @@
     }
     h1 {
       margin: 0;
-      font-size: 26px;
+      font-size: 24px;
       color: #38bdf8;
     }
     p.sub {
@@ -50,10 +50,10 @@
       border: 1px solid #1e293b;
     }
     .msg {
-      padding: 12px 18px;
+      padding: 14px 18px;
       border-radius: 10px;
-      max-width: 85%;
-      line-height: 1.5;
+      max-width: 88%;
+      line-height: 1.55;
       font-size: 14.5px;
       white-space: pre-wrap;
       word-break: break-word;
@@ -72,7 +72,6 @@
     .bot a {
       color: #38bdf8;
       text-decoration: underline;
-      word-break: break-all;
     }
     .input-box {
       display: flex;
@@ -115,16 +114,16 @@
 <body>
   <div class="container">
     <header>
-      <h1>🏆 Festival AI</h1>
-      <p class="sub">Consulta insights, casos y ejecuciones basados en 300 campañas premiadas.</p>
+      <h1>Festival AI</h1>
+      <p class="sub">Análisis estratégico y contraste de 300 campañas (Ganadoras vs. No ganadoras)</p>
     </header>
 
     <div id="chat">
-      <div class="msg bot">¡Hola! Cuéntame qué brief tienes, qué reto estás trabajando o qué tipo de referencias necesitas hoy.</div>
+      <div class="msg bot">Base de datos lista. Plantea un brief, un territorio de marca o una comparativa entre casos para iniciar el análisis.</div>
     </div>
 
     <form class="input-box" id="form">
-      <input type="text" id="pregunta" placeholder="Ej: Ideas que traduzcan datos complejos en experiencias emocionales..." required autocomplete="off">
+      <input type="text" id="pregunta" placeholder="Escribe tu consulta o reto estratégico..." required autocomplete="off">
       <button type="submit" id="btn">Enviar</button>
     </form>
   </div>
@@ -140,16 +139,14 @@
       const txt = input.value.trim();
       if (!txt) return;
 
-      // Mostrar mensaje del usuario
       chat.innerHTML += `<div class="msg user">${txt}</div>`;
       input.value = '';
       btn.disabled = true;
       chat.scrollTop = chat.scrollHeight;
 
-      // Mensaje de carga
       const loading = document.createElement('div');
       loading.className = 'msg bot';
-      loading.innerText = 'Analizando base de datos y redactando respuesta...';
+      loading.innerText = 'Razonando y analizando casos en la base de datos...';
       chat.appendChild(loading);
       chat.scrollTop = chat.scrollHeight;
 
@@ -163,15 +160,14 @@
         const data = await res.json();
 
         if (!res.ok) {
-          loading.innerText = `Error (${res.status}): ${data.error || 'Fallo interno en el servidor.'}`;
+          loading.innerText = `Error (${res.status}): ${data.error || 'Error interno en el servidor.'}`;
         } else {
-          // Detectar enlaces http/https y volverlos clickeables
           const textoFormateado = (data.respuesta || 'Sin respuesta.')
             .replace(/(https?:\/\/[^\s]+)/g, '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>');
           loading.innerHTML = textoFormateado;
         }
       } catch (err) {
-        loading.innerText = `Error de conexión: ${err.message}`;
+        loading.innerText = `Error de red: ${err.message}`;
       }
 
       btn.disabled = false;
