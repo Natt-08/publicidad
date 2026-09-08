@@ -49,9 +49,23 @@ export default async function handler(req, res) {
     if (queryNorm.includes('gaming') || queryNorm.includes('videojuego') || queryNorm.includes('esports')) terminosRelevantes.push('gaming', 'videojuego', 'esports', 'twitch', 'gamer', 'stevenage', 'fortnite');
     if (queryNorm.includes('halloween') || queryNorm.includes('terror') || queryNorm.includes('miedo')) terminosRelevantes.push('halloween', 'terror', 'miedo', 'horror', 'thriller');
 
-    // 2. SCORING INTELIGENTE
-    const palabrasProhibidas = new Set(['para', 'como', 'este', 'esta', 'campanas', 'versus', 'piezas', 'ganaron', 'hacer', 'unas', 'unos', 'sobre', 'entre', 'base', 'datos', 'links', 'link', 'dame', 'quiero', 'existe', 'alguna', 'nada', 'seguro', 'cannes', 'lions']);
-    const keywords = queryNorm.replace(/[^\w\s]/gi, '').split(/\s+/).filter(w => w.length > 3 && !palabrasProhibidas.has(w));
+    // 2. SCORING INTELIGENTE Y EXTRACCIÓN DE KEYWORDS
+    const palabrasProhibidas = new Set([
+      'para', 'como', 'este', 'esta', 'campanas', 'versus', 'piezas', 'ganaron', 
+      'hacer', 'unas', 'unos', 'sobre', 'entre', 'base', 'datos', 'links', 'link', 
+      'dame', 'quiero', 'existe', 'alguna', 'nada', 'seguro', 'cannes', 'lions',
+      'hay', 'las', 'los', 'del', 'que', 'por', 'con', 'sin', 'son', 'sus', 'una', 
+      'uno', 'muy', 'mas', 'eso', 'esa', 'ese', 'fue', 'fui', 'asi', 'aqui', 'ahi',
+      'si', 'no', 'de', 'el', 'la', 'en', 'un', 'al', 'su', 'lo', 'le', 'te', 'me', 'ya',
+      'busca', 'pasas', 'saco'
+    ]);
+    
+    // Límite >= 2 para permitir KFC, BK, HP, EA, etc.
+    const keywords = queryNorm
+      .replace(/[^\w\s]/gi, '')
+      .split(/\s+/)
+      .filter(w => w.length >= 2 && !palabrasProhibidas.has(w));
+      
     const aniosDetectados = queryNorm.match(/\b(20\d{2})\b/g) || [];
     const festivales = ['cannes', 'el ojo', 'clio', 'd&ad', 'eurobest'].filter(f => queryNorm.includes(f));
 
