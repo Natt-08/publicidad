@@ -32,7 +32,6 @@ export default async function handler(req, res) {
     const filePath = join(process.cwd(), 'campanas.json');
     const todasLasCampanas = JSON.parse(readFileSync(filePath, 'utf8'));
 
-    // CLAVE DE MEMORIA: Expandir la consulta con los turnos previos para no perder la campaña activa
     const ultimosTurnosUsuario = historial
       .filter(m => m.role === 'user')
       .slice(-2)
@@ -42,14 +41,12 @@ export default async function handler(req, res) {
     const queryCompuesta = `${ultimosTurnosUsuario} ${mensaje}`;
     const queryNorm = normalizar(queryCompuesta);
 
-    // 1. EXPANSIÓN SEMÁNTICA
     const terminosRelevantes = [];
     if (queryNorm.includes('termograf') || queryNorm.includes('calor') || queryNorm.includes('infrarroj')) terminosRelevantes.push('termograf', 'termic', 'thermal', 'infrarroj', 'infrared', 'eva clinic', 'untouchables');
     if (queryNorm.includes('cancer') || queryNorm.includes('mama') || queryNorm.includes('tumor')) terminosRelevantes.push('cancer', 'breast', 'oncolog', 'untouchables');
     if (queryNorm.includes('gaming') || queryNorm.includes('videojuego') || queryNorm.includes('esports')) terminosRelevantes.push('gaming', 'videojuego', 'esports', 'twitch', 'gamer', 'stevenage', 'fortnite');
     if (queryNorm.includes('halloween') || queryNorm.includes('terror') || queryNorm.includes('miedo')) terminosRelevantes.push('halloween', 'terror', 'miedo', 'horror', 'thriller');
 
-    // 2. SCORING INTELIGENTE Y EXTRACCIÓN DE KEYWORDS
     const palabrasProhibidas = new Set([
       'para', 'como', 'este', 'esta', 'campanas', 'versus', 'piezas', 'ganaron', 
       'hacer', 'unas', 'unos', 'sobre', 'entre', 'base', 'datos', 'links', 'link', 
@@ -57,10 +54,10 @@ export default async function handler(req, res) {
       'hay', 'las', 'los', 'del', 'que', 'por', 'con', 'sin', 'son', 'sus', 'una', 
       'uno', 'muy', 'mas', 'eso', 'esa', 'ese', 'fue', 'fui', 'asi', 'aqui', 'ahi',
       'si', 'no', 'de', 'el', 'la', 'en', 'un', 'al', 'su', 'lo', 'le', 'te', 'me', 'ya',
-      'busca', 'pasas', 'saco'
+      'busca', 'pasas', 'saco', 'analiza', 'porque', 'fueron', 'cuales', 'estos', 'estas',
+      'todos', 'todas', 'tienen', 'tiene', 'dime', 'explicame'
     ]);
     
-    // Límite >= 2 para permitir KFC, BK, HP, EA, etc.
     const keywords = queryNorm
       .replace(/[^\w\s]/gi, '')
       .split(/\s+/)
@@ -90,7 +87,9 @@ export default async function handler(req, res) {
 
       if (aniosDetectados.includes(String(c.AÑO || c.ANIO))) score += 30;
       festivales.forEach(f => { if (normalizar(c.FESTIVAL).includes(f)) score += 20; });
-      if (metales.includes('grand prix')) score += 15;
+      
+      if (queryNorm.includes('grand prix') && metales.includes('grand prix')) score += 1000;
+      else if (metales.includes('grand prix')) score += 15;
       else if (metales.includes('gold')) score += 10;
 
       if (queryNorm.includes('rechazad') || queryNorm.includes('no gan')) {
@@ -102,7 +101,6 @@ export default async function handler(req, res) {
     calificadas.sort((a, b) => b._score - a._score);
     const seleccionadas = calificadas.slice(0, 12);
 
-    // 3. GENERACIÓN DE CONTEXTO
     const baseSintetizada = seleccionadas.map((c, i) => {
       const titulo = String(c.Title || c.TITULO_PIEZA || 'S/T');
       const marca = String(c.MARCA || 'S/M');
@@ -131,21 +129,19 @@ REGLAS DE METALES:
 REGLAS ESTRICTAS:
 1. BÁSATE EXCLUSIVAMENTE EN LA INFORMACIÓN PROVISTA.
 2. Si preguntan por un tema y NO está en los casos, responde que no hay campañas registradas con esas características.
-3. Si el usuario hace repreguntas de seguimiento (ej. "¿y qué debilidad tuvo?", "¿qué marca era?", "¿quién fue la agencia?"), identifica a qué caso del historial se refiere y responde con exactitud.
+3. Si el usuario hace repreguntas de seguimiento, identifica a qué caso del historial se refiere y responde con exactitud.
 4. Si piden enlaces, usa Markdown: [Ver Board Oficial](URL).
+5. LÍMITE DE TIEMPO DEL SERVIDOR: Tienes prohibido escribir introducciones largas o conclusiones de relleno. Ve directamente al grano, utiliza viñetas cortas y no superes los 3 párrafos por respuesta para evitar cortes de conexión.
 `;
 
-    // 4. SANEO ESTRICTO DE HISTORIAL
-    const historialLargo = historial.slice(-20);
+    const historialLargo = historial.slice(-4);
     
-    // Mensajes para OpenAI / Groq / OpenRouter
     const mensajesOpenAI = [
       { role: 'system', content: promptSistema },
       ...historialLargo,
       { role: 'user', content: mensaje }
     ];
 
-    // Saneamiento para Gemini (debe alternar user -> model sin duplicados continuos)
     const historialGemini = [];
     let ultimoRol = null;
     
@@ -160,7 +156,6 @@ REGLAS ESTRICTAS:
       }
     }
 
-    // Asegurar que comience con 'user' si hay historial
     if (historialGemini.length > 0 && historialGemini[0].role === 'model') {
       historialGemini.shift();
     }
@@ -178,7 +173,7 @@ REGLAS ESTRICTAS:
               ...historialGemini,
               { role: 'user', parts: [{ text: `${promptSistema}\n\nConsulta actual: ${mensaje}` }] }
             ],
-            generationConfig: { temperature: 0.2, maxOutputTokens: 2000 }
+            generationConfig: { temperature: 0.2, maxOutputTokens: 8192 }
           };
           const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${keyGemini}`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
@@ -200,7 +195,7 @@ REGLAS ESTRICTAS:
         try {
           const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
             method: 'POST', headers: { 'Authorization': `Bearer ${keyGroq}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ model: modelo, messages: mensajesOpenAI, temperature: 0.2, max_tokens: 2000 })
+            body: JSON.stringify({ model: modelo, messages: mensajesOpenAI, temperature: 0.2, max_tokens: 8192 })
           });
           const data = await res.json();
           if (res.ok && data.choices?.[0]?.message?.content) {
@@ -229,7 +224,7 @@ REGLAS ESTRICTAS:
               messages: mensajesOpenAI, 
               temperature: 0.35, 
               presence_penalty: 0.4, 
-              max_tokens: 2000 
+              max_tokens: 8192 
             })
           });
           const data = await res.json();
