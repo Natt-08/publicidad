@@ -160,9 +160,21 @@ REGLAS ESTRICTAS:
       historialGemini.shift();
     }
 
-    const modelosGemini = ['gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-2.5-flash'];
-    const modelosGroq = ['groq/compound', 'groq/compound-mini', 'llama3-70b-8192', 'llama3-8b-8192', 'mixtral-8x7b-32768'];
-    const modelosOpenRouter = ['google/gemma-4-31b:free', 'nvidia/nemotron-3-ultra:free', 'poolside/laguna-s-2.1:free', 'thinkingmachines/inkling:free', 'cohere/north-mini-code:free'];
+    // REDUCIMOS A LOS MODELOS MÁS RÁPIDOS Y ESTABLES PARA EVITAR EL TIMEOUT DE VERCEL
+    const modelosGemini = [
+      'gemini-2.5-flash', 
+      'gemini-1.5-flash'  
+    ];
+    
+    const modelosGroq = [
+      'llama3-70b-8192',  
+      'llama3-8b-8192'
+    ];
+    
+    const modelosOpenRouter = [
+      'openrouter/free',              
+      'google/gemini-2.5-flash:free'  
+    ];
 
     async function rotarGemini() {
       if (!keyGemini) throw new Error('Key Gemini ausente');
