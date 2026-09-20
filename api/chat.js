@@ -13,6 +13,20 @@ function normalizar(texto) {
     .trim();
 }
 
+// Límite de espera de 10s por petición para evitar que el servidor Vercel agote su tiempo
+async function fetchConTimeout(url, opciones, timeoutMs = 10000) {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const respuesta = await fetch(url, { ...opciones, signal: controller.signal });
+    clearTimeout(id);
+    return respuesta;
+  } catch (error) {
+    clearTimeout(id);
+    throw error;
+  }
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Método no permitido' });
 
@@ -99,7 +113,7 @@ export default async function handler(req, res) {
     });
 
     calificadas.sort((a, b) => b._score - a._score);
-    const seleccionadas = calificadas.slice(0, 12);
+    const seleccionadas = calificadas.slice(0, 10);
 
     const baseSintetizada = seleccionadas.map((c, i) => {
       const titulo = String(c.Title || c.TITULO_PIEZA || 'S/T');
@@ -109,7 +123,7 @@ export default async function handler(req, res) {
       const linkBoard = c['Board image'] || c.URL || c.LINK || c.board_image || 'No disponible';
       
       let board = String(c['ANALISIS BOARD'] || '').replace(/\s+/g, ' ').trim();
-      const maxChars = i < 3 ? 1500 : 300; 
+      const maxChars = i < 2 ? 1000 : 250; 
       if (board.length > maxChars) board = board.substring(0, maxChars) + '...';
 
       return `--- CASO #${i + 1} ---\nTITULO: "${titulo}"\nMARCA: ${marca}\nFESTIVAL: ${fest}\nMETALES: ${metales}\nLINK: ${linkBoard}\nBOARD: ${board}\n-------------------`;
@@ -118,7 +132,7 @@ export default async function handler(req, res) {
     const promptSistema = `
 Eres un riguroso auditor de festivales publicitarios. Analiza los datos de la base manteniendo estricta coherencia con las preguntas anteriores del usuario.
 
-BASE EXTRACTADA (12 CASOS):
+BASE EXTRACTADA (10 CASOS):
 ${baseSintetizada}
 
 REGLAS DE METALES:
@@ -131,10 +145,10 @@ REGLAS ESTRICTAS:
 2. Si preguntan por un tema y NO está en los casos, responde que no hay campañas registradas con esas características.
 3. Si el usuario hace repreguntas de seguimiento, identifica a qué caso del historial se refiere y responde con exactitud.
 4. Si piden enlaces, usa Markdown: [Ver Board Oficial](URL).
-5. LÍMITE DE TIEMPO DEL SERVIDOR: Tienes prohibido escribir introducciones largas o conclusiones de relleno. Ve directamente al grano, utiliza viñetas cortas y no superes los 3 párrafos por respuesta para evitar cortes de conexión.
+5. RESPUESTA RÁPIDA: Ve directo al grano sin introducciones ni conclusiones largas. Máximo 3 párrafos breves o viñetas.
 `;
 
-    const historialLargo = historial.slice(-4);
+    const historialLargo = historial.slice(-3);
     
     const mensajesOpenAI = [
       { role: 'system', content: promptSistema },
@@ -160,20 +174,28 @@ REGLAS ESTRICTAS:
       historialGemini.shift();
     }
 
-    // REDUCIMOS A LOS MODELOS MÁS RÁPIDOS Y ESTABLES PARA EVITAR EL TIMEOUT DE VERCEL
     const modelosGemini = [
       'gemini-2.5-flash', 
       'gemini-1.5-flash'  
     ];
     
+    // Modelos activos extraídos de las capturas de pantalla, descartando los deprecated
     const modelosGroq = [
-      'llama3-70b-8192',  
-      'llama3-8b-8192'
+      'openai/gpt-oss-120b',
+      'qwen/qwen3.8-27b'
     ];
     
+    // Modelos de chat y razonamiento gratuitos purgados (sin Embeddings ni Rerankers)
     const modelosOpenRouter = [
-      'openrouter/free',              
-      'google/gemini-2.5-flash:free'  
+      'thinkingmachines/inkling:free',
+      'poolside/laguna-xs-2.1:free',
+      'cohere/north-mini-code:free',
+      'z-ai/glm-5.2:free',
+      'nvidia/nemotron-3-ultra:free',
+      'nvidia/nemotron-3-nano-omni:free',
+      'google/gemma-4-26b-a4b:free',
+      'google/gemma-4-31b:free',
+      'nvidia/nemotron-3-super:free'
     ];
 
     async function rotarGemini() {
@@ -185,17 +207,17 @@ REGLAS ESTRICTAS:
               ...historialGemini,
               { role: 'user', parts: [{ text: `${promptSistema}\n\nConsulta actual: ${mensaje}` }] }
             ],
-            generationConfig: { temperature: 0.2, maxOutputTokens: 8192 }
+            generationConfig: { temperature: 0.2, maxOutputTokens: 1200 }
           };
-          const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${keyGemini}`, {
+          const res = await fetchConTimeout(`https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${keyGemini}`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
-          });
+          }, 9000);
           const data = await res.json();
           if (res.ok && data.candidates?.[0]?.content?.parts?.[0]?.text) {
             return data.candidates[0].content.parts[0].text;
           }
         } catch (e) {
-          console.warn(`Gemini (${modelo}) falló, probando siguiente...`);
+          console.warn(`Gemini (${modelo}) omitido por lentitud o error.`);
         }
       }
       throw new Error('Todos los modelos de Gemini fallaron.');
@@ -205,26 +227,26 @@ REGLAS ESTRICTAS:
       if (!keyGroq) throw new Error('Key Groq ausente');
       for (const modelo of modelosGroq) {
         try {
-          const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+          const res = await fetchConTimeout('https://api.groq.com/openai/v1/chat/completions', {
             method: 'POST', headers: { 'Authorization': `Bearer ${keyGroq}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ model: modelo, messages: mensajesOpenAI, temperature: 0.2, max_tokens: 8192 })
-          });
+            body: JSON.stringify({ model: modelo, messages: mensajesOpenAI, temperature: 0.2, max_tokens: 1200 })
+          }, 8000);
           const data = await res.json();
           if (res.ok && data.choices?.[0]?.message?.content) {
             return data.choices[0].message.content;
           }
         } catch (e) {
-          console.warn(`Groq (${modelo}) falló, probando siguiente...`);
+          console.warn(`Groq (${modelo}) omitido por lentitud o error.`);
         }
       }
-      throw new Error('Todos los modelos de Groq fallaron.');
+      throw new Error('Todos los modelos de la API personalizada fallaron.');
     }
 
     async function rotarOpenRouter() {
       if (!keyOpenRouter) throw new Error('Key OpenRouter ausente');
       for (const modelo of modelosOpenRouter) {
         try {
-          const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          const res = await fetchConTimeout('https://openrouter.ai/api/v1/chat/completions', {
             method: 'POST', headers: { 
               'Authorization': `Bearer ${keyOpenRouter}`, 
               'Content-Type': 'application/json', 
@@ -234,17 +256,16 @@ REGLAS ESTRICTAS:
             body: JSON.stringify({ 
               model: modelo, 
               messages: mensajesOpenAI, 
-              temperature: 0.35, 
-              presence_penalty: 0.4, 
-              max_tokens: 8192 
+              temperature: 0.3, 
+              max_tokens: 1200 
             })
-          });
+          }, 11000);
           const data = await res.json();
           if (res.ok && data.choices?.[0]?.message?.content) {
             return data.choices[0].message.content;
           }
         } catch (e) {
-          console.warn(`OpenRouter (${modelo}) falló, probando siguiente...`);
+          console.warn(`OpenRouter (${modelo}) omitido por lentitud o error.`);
         }
       }
       throw new Error('Todos los modelos de OpenRouter fallaron.');
@@ -262,7 +283,7 @@ REGLAS ESTRICTAS:
           try {
             respuestaTexto = await rotarOpenRouter();
           } catch (err3) {
-            throw new Error(`Cascada colapsada globalmente.`);
+            throw new Error('Cascada colapsada globalmente. Revisa el estado de tus API keys.');
           }
         }
       }
