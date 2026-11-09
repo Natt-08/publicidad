@@ -1,302 +1,540 @@
-import { readFileSync } from 'fs';
-import { join } from 'path';
 
 export const config = {
   maxDuration: 60
 };
 
+// Normalizar texto para buscar coincidencias
 function normalizar(texto) {
-  return String(texto || '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
+  return String(texto || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
     .trim();
 }
 
-// Límite de espera de 10s por petición para evitar que el servidor Vercel agote su tiempo
-async function fetchConTimeout(url, opciones, timeoutMs = 10000) {
+// Hacer peticiones con tiempo máximo de espera
+async function fetchConTimeout(url, opciones, tiempo = 12000) {
   const controller = new AbortController();
-  const id = setTimeout(() => controller.abort(), timeoutMs);
+  const timer = setTimeout(() => controller.abort(), tiempo);
+
   try {
-    const respuesta = await fetch(url, { ...opciones, signal: controller.signal });
-    clearTimeout(id);
-    return respuesta;
-  } catch (error) {
-    clearTimeout(id);
-    throw error;
+    return await fetch(url, {
+      ...opciones,
+      signal: controller.signal
+    });
+  } finally {
+    clearTimeout(timer);
   }
 }
 
+// Obtener todas las campañas de Supabase
+async function obtenerCampanas() {
+  const url = (process.env.SUPABASE_URL || "")
+    .replace(/\/$/, "");
+
+  const key =
+    process.env.SUPABASE_SECRET_KEY ||
+    process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!url || !key) {
+    throw new Error(
+      "Faltan SUPABASE_URL o SUPABASE_SECRET_KEY en Vercel."
+    );
+  }
+
+  const todas = [];
+  const cantidadPorPagina = 500;
+
+  for (let inicio = 0; inicio < 100000; inicio += cantidadPorPagina) {
+    const parametros = new URLSearchParams({
+      select: "titulo,marca,festival,anio,categorias,metales,agencia,analisis_board,board_image",
+      order: "id.asc",
+      offset: String(inicio),
+      limit: String(cantidadPorPagina)
+    });
+
+    const respuesta = await fetchConTimeout(
+      `${url}/rest/v1/campanas?${parametros}`,
+      {
+        headers: {
+          apikey: key,
+          ...(key.startsWith("sb_secret_")
+            ? {}
+            : { Authorization: `Bearer ${key}` })
+        }
+      }
+    );
+
+    if (!respuesta.ok) {
+      const detalle = await respuesta.text();
+      throw new Error(
+        `Supabase respondió ${respuesta.status}: ${detalle.slice(0, 250)}`
+      );
+    }
+
+    const registros = await respuesta.json();
+
+    if (!Array.isArray(registros)) {
+      throw new Error("Respuesta inválida de Supabase.");
+    }
+
+    todas.push(...registros);
+
+    if (registros.length < cantidadPorPagina) {
+      break;
+    }
+  }
+
+  return todas;
+}
+
+// Identificar palabras clave de una consulta
+function obtenerPalabras(texto) {
+  const excluidas = new Set([
+    "para", "como", "esta", "este", "estos", "estas",
+    "campanas", "campana", "cuales", "quiero", "dame",
+    "busca", "analiza", "explica", "sobre", "entre",
+    "todas", "todos", "tiene", "tienen", "hacer",
+    "donde", "cuando", "porque", "desde", "hasta",
+    "ganaron", "ganadoras", "datos", "base", "dime",
+    "puedes", "ejemplos", "casos", "ideas", "algo",
+    "alguna", "alguno", "fueron", "fue", "son",
+    "con", "sin", "una", "uno", "los", "las",
+    "del", "por", "que", "sus", "hay", "mas",
+    "de", "la", "el", "en", "un", "al",
+    "lo", "le", "se", "me", "es", "no", "si"
+  ]);
+
+  return normalizar(texto)
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter(p => p.length >= 3 && !excluidas.has(p));
+}
+
+// Buscar campañas relevantes en toda la colección
+function buscarCampanas(campanas, pregunta) {
+  const consulta = normalizar(pregunta);
+  const palabras = obtenerPalabras(pregunta);
+
+  const sinonimos = [];
+
+  if (/gaming|videojuego|esport|gamificacion/.test(consulta)) {
+    sinonimos.push(
+      "gaming", "game", "gamer", "videojuego",
+      "fortnite", "minecraft", "esport", "twitch"
+    );
+  }
+
+  if (/cancer|tumor|oncolog|mama/.test(consulta)) {
+    sinonimos.push(
+      "cancer", "breast", "tumor", "oncolog", "mammogram"
+    );
+  }
+
+  if (/termograf|infrarroj|calor/.test(consulta)) {
+    sinonimos.push(
+      "termograf", "thermal", "infrared", "termic"
+    );
+  }
+
+  if (/halloween|terror|miedo/.test(consulta)) {
+    sinonimos.push(
+      "halloween", "horror", "terror", "miedo"
+    );
+  }
+
+  const anios = consulta.match(/\b20\d{2}\b/g) || [];
+
+  const festivales = [
+    "cannes",
+    "eurobest",
+    "dubai lynx",
+    "clio",
+    "el ojo",
+    "d&ad"
+  ].filter(f => consulta.includes(f));
+
+  const solicitaGrandPrix = consulta.includes("grand prix");
+
+  const resultados = campanas.map(c => {
+    const titulo = normalizar(c.titulo);
+    const marca = normalizar(c.marca);
+    const board = normalizar(c.analisis_board);
+    const categorias = normalizar(c.categorias);
+    const metales = normalizar(c.metales);
+    const agencia = normalizar(c.agencia);
+    const festival = normalizar(c.festival);
+
+    let score = 0;
+
+    for (const palabra of palabras) {
+      if (titulo.includes(palabra)) score += 120;
+      if (marca.includes(palabra)) score += 100;
+      if (agencia.includes(palabra)) score += 65;
+      if (categorias.includes(palabra)) score += 60;
+      if (board.includes(palabra)) score += 45;
+    }
+
+    for (const sinonimo of sinonimos) {
+      if (titulo.includes(sinonimo)) score += 180;
+      if (categorias.includes(sinonimo)) score += 110;
+      if (board.includes(sinonimo)) score += 90;
+    }
+
+    if (anios.includes(String(c.anio))) {
+      score += 40;
+    }
+
+    for (const f of festivales) {
+      if (festival.includes(f)) score += 50;
+    }
+
+    if (solicitaGrandPrix && metales.includes("grand prix")) {
+      score += 300;
+    }
+
+    if (consulta.includes("gold") && metales.includes("gold")) {
+      score += 150;
+    }
+
+    if (consulta.includes("silver") && metales.includes("silver")) {
+      score += 150;
+    }
+
+    if (consulta.includes("bronze") && metales.includes("bronze")) {
+      score += 150;
+    }
+
+    return { ...c, _score: score };
+  });
+
+  resultados.sort((a, b) => b._score - a._score);
+
+  const encontrados = resultados.filter(c => c._score > 0);
+
+  return {
+    totalCoincidencias: encontrados.length,
+    seleccionadas: encontrados.slice(0, 20)
+  };
+}
+
+// Preparar casos para la inteligencia artificial
+function construirContexto(campanas) {
+  return campanas.map((c, i) => {
+    const analisis = String(c.analisis_board || "")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    const limite = i < 5 ? 1500 : 600;
+
+    return [
+      `CASO ${i + 1}`,
+      `TÍTULO: ${c.titulo || "Sin título"}`,
+      `MARCA: ${c.marca || "No registrada"}`,
+      `FESTIVAL: ${c.festival || "No registrado"}`,
+      `AÑO: ${c.anio || "No registrado"}`,
+      `AGENCIA: ${c.agencia || "No registrada"}`,
+      `CATEGORÍAS: ${c.categorias || "No registradas"}`,
+      `PREMIOS: ${c.metales || "No registrados"}`,
+      `ANÁLISIS: ${analisis.slice(0, limite) || "No disponible"}`,
+      `ENLACE: ${c.board_image || "No disponible"}`
+    ].join("\n");
+  }).join("\n\n----------------------\n\n");
+}
+
+// Función principal de Vercel
 export default async function handler(req, res) {
-  if (req.method !== 'POST') return res.status(405).json({ error: 'Método no permitido' });
+  if (req.method !== "POST") {
+    return res.status(405).json({
+      error: "Método no permitido"
+    });
+  }
 
   const { mensaje, historial = [] } = req.body || {};
-  if (!mensaje) return res.status(400).json({ error: 'Falta el mensaje en la consulta.' });
 
-  const keyGemini = process.env.GEMINI_API_KEY || req.headers['x-gemini-key'];
-  const keyGroq = process.env.GROQ_API_KEY || req.headers['x-groq-key'];
-  const keyOpenRouter = process.env.OPENROUTER_API_KEY || req.headers['x-openrouter-key'];
-  const estrategia = req.headers['x-strategy'] || 'auto'; 
+  if (!mensaje || typeof mensaje !== "string") {
+    return res.status(400).json({
+      error: "Escribe una consulta válida."
+    });
+  }
 
-  if (!keyGemini && !keyGroq && !keyOpenRouter) {
-    return res.status(500).json({ error: 'Faltan las variables de entorno (API Keys) en Vercel.' });
+  const geminiKey = process.env.GEMINI_API_KEY;
+  const groqKey = process.env.GROQ_API_KEY;
+  const openrouterKey = process.env.OPENROUTER_API_KEY;
+
+  const estrategia = req.headers["x-strategy"] || "auto";
+
+  if (!geminiKey && !groqKey && !openrouterKey) {
+    return res.status(500).json({
+      error: "No hay claves API de inteligencia artificial configuradas."
+    });
   }
 
   try {
-    const filePath = join(process.cwd(), 'campanas.json');
-    const todasLasCampanas = JSON.parse(readFileSync(filePath, 'utf8'));
+    const campanas = await obtenerCampanas();
 
-    const ultimosTurnosUsuario = historial
-      .filter(m => m.role === 'user')
+    const historialSeguro = Array.isArray(historial)
+      ? historial.slice(-4).filter(m =>
+          ["user", "assistant"].includes(m.role) &&
+          typeof m.content === "string"
+        )
+      : [];
+
+    const consultasPrevias = historialSeguro
+      .filter(m => m.role === "user")
       .slice(-2)
       .map(m => m.content)
-      .join(' ');
-    
-    const queryCompuesta = `${ultimosTurnosUsuario} ${mensaje}`;
-    const queryNorm = normalizar(queryCompuesta);
+      .join(" ");
 
-    const terminosRelevantes = [];
-    if (queryNorm.includes('termograf') || queryNorm.includes('calor') || queryNorm.includes('infrarroj')) terminosRelevantes.push('termograf', 'termic', 'thermal', 'infrarroj', 'infrared', 'eva clinic', 'untouchables');
-    if (queryNorm.includes('cancer') || queryNorm.includes('mama') || queryNorm.includes('tumor')) terminosRelevantes.push('cancer', 'breast', 'oncolog', 'untouchables');
-    if (queryNorm.includes('gaming') || queryNorm.includes('videojuego') || queryNorm.includes('esports')) terminosRelevantes.push('gaming', 'videojuego', 'esports', 'twitch', 'gamer', 'stevenage', 'fortnite');
-    if (queryNorm.includes('halloween') || queryNorm.includes('terror') || queryNorm.includes('miedo')) terminosRelevantes.push('halloween', 'terror', 'miedo', 'horror', 'thriller');
+    const busqueda = buscarCampanas(
+      campanas,
+      `${consultasPrevias} ${mensaje}`
+    );
 
-    const palabrasProhibidas = new Set([
-      'para', 'como', 'este', 'esta', 'campanas', 'versus', 'piezas', 'ganaron', 
-      'hacer', 'unas', 'unos', 'sobre', 'entre', 'base', 'datos', 'links', 'link', 
-      'dame', 'quiero', 'existe', 'alguna', 'nada', 'seguro', 'cannes', 'lions',
-      'hay', 'las', 'los', 'del', 'que', 'por', 'con', 'sin', 'son', 'sus', 'una', 
-      'uno', 'muy', 'mas', 'eso', 'esa', 'ese', 'fue', 'fui', 'asi', 'aqui', 'ahi',
-      'si', 'no', 'de', 'el', 'la', 'en', 'un', 'al', 'su', 'lo', 'le', 'te', 'me', 'ya',
-      'busca', 'pasas', 'saco', 'analiza', 'porque', 'fueron', 'cuales', 'estos', 'estas',
-      'todos', 'todas', 'tienen', 'tiene', 'dime', 'explicame'
-    ]);
-    
-    const keywords = queryNorm
-      .replace(/[^\w\s]/gi, '')
-      .split(/\s+/)
-      .filter(w => w.length >= 2 && !palabrasProhibidas.has(w));
-      
-    const aniosDetectados = queryNorm.match(/\b(20\d{2})\b/g) || [];
-    const festivales = ['cannes', 'el ojo', 'clio', 'd&ad', 'eurobest'].filter(f => queryNorm.includes(f));
-
-    const calificadas = todasLasCampanas.map(c => {
-      let score = 0;
-      const metales = normalizar(c.METAL_SUMMARY || c.METAL);
-      const titulo = normalizar(c.Title || c.TITULO_PIEZA);
-      const marca = normalizar(c.MARCA);
-      const board = normalizar(c['ANALISIS BOARD']);
-
-      terminosRelevantes.forEach(t => {
-        if (titulo.includes(t)) score += 500;
-        if (board.includes(t)) score += 400;
-        if (marca.includes(t)) score += 300;
-      });
-
-      keywords.forEach(kw => {
-        if (titulo.includes(kw)) score += 100;
-        if (marca.includes(kw)) score += 80;
-        if (board.includes(kw)) score += 50;
-      });
-
-      if (aniosDetectados.includes(String(c.AÑO || c.ANIO))) score += 30;
-      festivales.forEach(f => { if (normalizar(c.FESTIVAL).includes(f)) score += 20; });
-      
-      if (queryNorm.includes('grand prix') && metales.includes('grand prix')) score += 1000;
-      else if (metales.includes('grand prix')) score += 15;
-      else if (metales.includes('gold')) score += 10;
-
-      if (queryNorm.includes('rechazad') || queryNorm.includes('no gan')) {
-        if (metales.includes('no gano') && !metales.includes('grand prix') && !metales.includes('gold')) score += 60;
-      }
-      return { ...c, _score: score };
-    });
-
-    calificadas.sort((a, b) => b._score - a._score);
-    const seleccionadas = calificadas.slice(0, 10);
-
-    const baseSintetizada = seleccionadas.map((c, i) => {
-      const titulo = String(c.Title || c.TITULO_PIEZA || 'S/T');
-      const marca = String(c.MARCA || 'S/M');
-      const fest = `${String(c.FESTIVAL || 'CANNES')} ${String(c.AÑO || c.ANIO || '')}`.trim();
-      const metales = String(c.METAL_SUMMARY || c.METAL || 'NO GANO');
-      const linkBoard = c['Board image'] || c.URL || c.LINK || c.board_image || 'No disponible';
-      
-      let board = String(c['ANALISIS BOARD'] || '').replace(/\s+/g, ' ').trim();
-      const maxChars = i < 2 ? 1000 : 250; 
-      if (board.length > maxChars) board = board.substring(0, maxChars) + '...';
-
-      return `--- CASO #${i + 1} ---\nTITULO: "${titulo}"\nMARCA: ${marca}\nFESTIVAL: ${fest}\nMETALES: ${metales}\nLINK: ${linkBoard}\nBOARD: ${board}\n-------------------`;
-    }).join('\n\n');
+    const contexto = construirContexto(
+      busqueda.seleccionadas
+    );
 
     const promptSistema = `
-Eres un riguroso auditor de festivales publicitarios. Analiza los datos de la base manteniendo estricta coherencia con las preguntas anteriores del usuario.
+Eres FESTIVAL AI, un investigador y jurado especializado
+en creatividad publicitaria y festivales internacionales.
 
-BASE EXTRACTADA (10 CASOS):
-${baseSintetizada}
+Tu objetivo es analizar campañas publicitarias reales
+utilizando exclusivamente los registros recuperados
+de la base de datos del usuario.
 
-REGLAS DE METALES:
-- "Grand Prix", "Gold", "Silver", "Bronze": Ganadoras comprobadas.
-- "Shortlist": Pasó la primera ronda pero NO ganó metal.
-- "NO GANO": ELIMINADA / RECHAZADA. No entró ni a Shortlist.
+BASE DE DATOS:
+Total de campañas registradas: ${campanas.length}
+Coincidencias textuales encontradas: ${busqueda.totalCoincidencias}
+Campañas entregadas para análisis: ${busqueda.seleccionadas.length}
 
-REGLAS ESTRICTAS:
-1. BÁSATE EXCLUSIVAMENTE EN LA INFORMACIÓN PROVISTA.
-2. Si preguntan por un tema y NO está en los casos, responde que no hay campañas registradas con esas características.
-3. Si el usuario hace repreguntas de seguimiento, identifica a qué caso del historial se refiere y responde con exactitud.
-4. Si piden enlaces, usa Markdown: [Ver Board Oficial](URL).
-5. RESPUESTA RÁPIDA: Ve directo al grano sin introducciones ni conclusiones largas. Máximo 3 párrafos breves o viñetas.
+CAMPAÑAS RECUPERADAS:
+${contexto || "No se encontraron coincidencias textuales."}
+
+REGLAS:
+
+1. No inventes campañas, premios, marcas ni enlaces.
+
+2. Diferencia claramente los premios Gold, Silver,
+Bronze, Grand Prix, Shortlist y NO GANO.
+
+3. Una misma campaña puede ganar en una categoría
+y no ganar en otras. No confundas esos resultados.
+
+4. Analiza las ideas desde la perspectiva creativa:
+problema, insight, concepto, ejecución y originalidad.
+
+5. Cuando compares campañas, identifica semejanzas
+y diferencias concretas.
+
+6. Si el usuario solicita enlaces, utiliza los enlaces
+que aparecen en los registros.
+
+7. Las campañas recuperadas son solo una selección.
+No afirmes que algo no existe en toda la base
+si no aparece en esta selección.
+
+8. Si la pregunta requiere examinar todas las campañas,
+advierte que el análisis es parcial y no exhaustivo.
+
+9. Si falta información en el análisis de un board,
+indícalo claramente.
+
+10. No confundas una coincidencia de palabras con una
+similitud creativa demostrada.
+
+11. Responde en español, de forma clara, precisa
+y con información verificable.
 `;
 
-    const historialLargo = historial.slice(-3);
-    
-    const mensajesOpenAI = [
-      { role: 'system', content: promptSistema },
-      ...historialLargo,
-      { role: 'user', content: mensaje }
-    ];
-
-    const historialGemini = [];
-    let ultimoRol = null;
-    
-    for (const msg of historialLargo) {
-      const rolActual = msg.role === 'assistant' ? 'model' : 'user';
-      if (rolActual !== ultimoRol) {
-        historialGemini.push({
-          role: rolActual,
-          parts: [{ text: String(msg.content) }]
-        });
-        ultimoRol = rolActual;
+    const mensajes = [
+      {
+        role: "system",
+        content: promptSistema
+      },
+      ...historialSeguro,
+      {
+        role: "user",
+        content: mensaje
       }
-    }
-
-    if (historialGemini.length > 0 && historialGemini[0].role === 'model') {
-      historialGemini.shift();
-    }
-
-    const modelosGemini = [
-      'gemini-2.5-flash', 
-      'gemini-1.5-flash'  
-    ];
-    
-    // Modelos activos extraídos de las capturas de pantalla, descartando los deprecated
-    const modelosGroq = [
-      'openai/gpt-oss-120b',
-      'qwen/qwen3.8-27b'
-    ];
-    
-    // Modelos de chat y razonamiento gratuitos purgados (sin Embeddings ni Rerankers)
-    const modelosOpenRouter = [
-      'thinkingmachines/inkling:free',
-      'poolside/laguna-xs-2.1:free',
-      'cohere/north-mini-code:free',
-      'z-ai/glm-5.2:free',
-      'nvidia/nemotron-3-ultra:free',
-      'nvidia/nemotron-3-nano-omni:free',
-      'google/gemma-4-26b-a4b:free',
-      'google/gemma-4-31b:free',
-      'nvidia/nemotron-3-super:free'
     ];
 
-    async function rotarGemini() {
-      if (!keyGemini) throw new Error('Key Gemini ausente');
-      for (const modelo of modelosGemini) {
-        try {
-          const payload = {
-            contents: [
-              ...historialGemini,
-              { role: 'user', parts: [{ text: `${promptSistema}\n\nConsulta actual: ${mensaje}` }] }
-            ],
-            generationConfig: { temperature: 0.2, maxOutputTokens: 1200 }
-          };
-          const res = await fetchConTimeout(`https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${keyGemini}`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
-          }, 9000);
-          const data = await res.json();
-          if (res.ok && data.candidates?.[0]?.content?.parts?.[0]?.text) {
-            return data.candidates[0].content.parts[0].text;
-          }
-        } catch (e) {
-          console.warn(`Gemini (${modelo}) omitido por lentitud o error.`);
-        }
-      }
-      throw new Error('Todos los modelos de Gemini fallaron.');
-    }
+    async function llamarOpenAICompatible(
+      endpoint,
+      key,
+      modelos,
+      proveedor
+    ) {
+      if (!key) throw new Error(`Sin clave de ${proveedor}`);
 
-    async function rotarGroq() {
-      if (!keyGroq) throw new Error('Key Groq ausente');
-      for (const modelo of modelosGroq) {
+      for (const modelo of modelos) {
         try {
-          const res = await fetchConTimeout('https://api.groq.com/openai/v1/chat/completions', {
-            method: 'POST', headers: { 'Authorization': `Bearer ${keyGroq}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ model: modelo, messages: mensajesOpenAI, temperature: 0.2, max_tokens: 1200 })
-          }, 8000);
-          const data = await res.json();
-          if (res.ok && data.choices?.[0]?.message?.content) {
-            return data.choices[0].message.content;
-          }
-        } catch (e) {
-          console.warn(`Groq (${modelo}) omitido por lentitud o error.`);
-        }
-      }
-      throw new Error('Todos los modelos de la API personalizada fallaron.');
-    }
-
-    async function rotarOpenRouter() {
-      if (!keyOpenRouter) throw new Error('Key OpenRouter ausente');
-      for (const modelo of modelosOpenRouter) {
-        try {
-          const res = await fetchConTimeout('https://openrouter.ai/api/v1/chat/completions', {
-            method: 'POST', headers: { 
-              'Authorization': `Bearer ${keyOpenRouter}`, 
-              'Content-Type': 'application/json', 
-              'HTTP-Referer': 'https://festival-ai.vercel.app', 
-              'X-Title': 'Festival AI' 
+          const respuesta = await fetchConTimeout(
+            endpoint,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${key}`,
+                ...(proveedor === "OpenRouter"
+                  ? {
+                      "HTTP-Referer": "https://festival-ai.vercel.app",
+                      "X-Title": "Festival AI"
+                    }
+                  : {})
+              },
+              body: JSON.stringify({
+                model: modelo,
+                messages: mensajes,
+                temperature: 0.2,
+                max_tokens: 1600
+              })
             },
-            body: JSON.stringify({ 
-              model: modelo, 
-              messages: mensajesOpenAI, 
-              temperature: 0.3, 
-              max_tokens: 1200 
-            })
-          }, 11000);
-          const data = await res.json();
-          if (res.ok && data.choices?.[0]?.message?.content) {
-            return data.choices[0].message.content;
+            10000
+          );
+
+          const data = await respuesta.json();
+
+          if (!respuesta.ok) {
+            console.warn(proveedor, modelo, respuesta.status);
+            continue;
           }
-        } catch (e) {
-          console.warn(`OpenRouter (${modelo}) omitido por lentitud o error.`);
+
+          const texto = data.choices?.[0]?.message?.content;
+
+          if (typeof texto === "string" && texto.trim()) {
+            return texto;
+          }
+
+        } catch (error) {
+          console.warn(proveedor, modelo, error.message);
         }
       }
-      throw new Error('Todos los modelos de OpenRouter fallaron.');
+
+      throw new Error(`No hubo respuesta válida de ${proveedor}`);
     }
+
+    async function llamarGemini() {
+      if (!geminiKey) throw new Error("Sin clave Gemini");
+
+      const modelos = [
+        "gemini-2.5-flash",
+        "gemini-2.5-flash-lite"
+      ];
+
+      for (const modelo of modelos) {
+        try {
+          const respuesta = await fetchConTimeout(
+            `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "x-goog-api-key": geminiKey
+              },
+              body: JSON.stringify({
+                contents: [{
+                  role: "user",
+                  parts: [{
+                    text: `${promptSistema}\n\nCONSULTA:\n${mensaje}`
+                  }]
+                }],
+                generationConfig: {
+                  temperature: 0.2,
+                  maxOutputTokens: 2000
+                }
+              })
+            },
+            12000
+          );
+
+          const data = await respuesta.json();
+
+          if (!respuesta.ok) {
+            console.warn("Gemini", modelo, respuesta.status);
+            continue;
+          }
+
+          const texto = data.candidates?.[0]?.content?.parts
+            ?.map(p => p.text || "")
+            .join("");
+
+          if (texto?.trim()) return texto;
+
+        } catch (error) {
+          console.warn("Gemini", modelo, error.message);
+        }
+      }
+
+      throw new Error("Gemini no respondió.");
+    }
+
+    async function llamarGroq() {
+      return llamarOpenAICompatible(
+        "https://api.groq.com/openai/v1/chat/completions",
+        groqKey,
+        [
+          "openai/gpt-oss-120b",
+          "openai/gpt-oss-20b"
+        ],
+        "Groq"
+      );
+    }
+
+    async function llamarOpenRouter() {
+      return llamarOpenAICompatible(
+        "https://openrouter.ai/api/v1/chat/completions",
+        openrouterKey,
+        [
+          "openai/gpt-oss-20b:free",
+          "google/gemma-3-27b-it:free"
+        ],
+        "OpenRouter"
+      );
+    }
+
+    const proveedores = {
+      gemini: llamarGemini,
+      groq: llamarGroq,
+      openrouter: llamarOpenRouter
+    };
+
+    const orden = estrategia === "auto"
+      ? ["gemini", "groq", "openrouter"]
+      : [estrategia];
 
     let respuestaTexto = null;
+    const errores = [];
 
-    if (estrategia === 'auto') {
+    for (const proveedor of orden) {
+      if (!proveedores[proveedor]) continue;
+
       try {
-        respuestaTexto = await rotarGemini();
-      } catch (err1) {
-        try {
-          respuestaTexto = await rotarGroq();
-        } catch (err2) {
-          try {
-            respuestaTexto = await rotarOpenRouter();
-          } catch (err3) {
-            throw new Error('Cascada colapsada globalmente. Revisa el estado de tus API keys.');
-          }
-        }
+        respuestaTexto = await proveedores[proveedor]();
+        if (respuestaTexto) break;
+      } catch (error) {
+        errores.push(`${proveedor}: ${error.message}`);
       }
-    } else if (estrategia === 'gemini') { respuestaTexto = await rotarGemini(); }
-    else if (estrategia === 'groq') { respuestaTexto = await rotarGroq(); }
-    else if (estrategia === 'openrouter') { respuestaTexto = await rotarOpenRouter(); }
+    }
 
-    if (!respuestaTexto) return res.status(500).json({ error: 'Respuesta vacía de los modelos.' });
+    if (!respuestaTexto) {
+      throw new Error(
+        "Ningún proveedor respondió. " + errores.join("; ")
+      );
+    }
 
-    return res.status(200).json({ respuesta: respuestaTexto });
+    return res.status(200).json({
+      respuesta: respuestaTexto,
+      registrosTotales: campanas.length,
+      coincidencias: busqueda.totalCoincidencias,
+      casosAnalizados: busqueda.seleccionadas.length
+    });
 
   } catch (error) {
-    console.error('Error general:', error);
-    return res.status(500).json({ error: error.message || 'Error interno del servidor' });
+    console.error("Festival AI:", error);
+
+    return res.status(500).json({
+      error: error.message || "Error interno del servidor."
+    });
   }
 }
