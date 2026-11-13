@@ -1,23 +1,57 @@
 
+ // FESTIVAL AI
+// Supabase + pgvector + Gemini + Groq + OpenRouter
+// Las claves API deben estar configuradas en Vercel.
+
 export const config = {
   maxDuration: 60
 };
 
 // ==========================================
-// FESTIVAL AI - SUPABASE + BUSQUEDA SEMANTICA
+// MODELOS DE INTELIGENCIA ARTIFICIAL
 // ==========================================
 
-function normalizar(texto) {
-  return String(texto || "")
+const MODELOS_GEMINI = [
+  "gemini-3.5-flash-lite",
+  "gemini-3.1-flash-lite",
+  "gemini-3.8-flash",
+  "gemini-3.6-flash"
+];
+
+const MODELOS_GROQ = [
+  "openai/gpt-oss-120b",
+  "openai/gpt-oss-20b"
+];
+
+// Caché temporal del catálogo gratuito.
+let cacheCatalogoOpenRouter = {
+  expira: 0,
+  modelos: []
+};
+
+// ==========================================
+// FUNCIONES GENERALES
+// ==========================================
+
+function normalizar(valor) {
+  return String(valor ?? "")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
     .trim();
 }
 
-async function fetchConTimeout(url, opciones, tiempo = 12000) {
+async function fetchConTimeout(
+  url,
+  opciones = {},
+  ms = 10000
+) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), tiempo);
+
+  const temporizador = setTimeout(
+    () => controller.abort(),
+    ms
+  );
 
   try {
     return await fetch(url, {
@@ -25,17 +59,18 @@ async function fetchConTimeout(url, opciones, tiempo = 12000) {
       signal: controller.signal
     });
   } finally {
-    clearTimeout(timer);
+    clearTimeout(temporizador);
   }
 }
 
 // ==========================================
-// 1. CONFIGURACION DE SUPABASE
+// 1. CONEXION CON SUPABASE
 // ==========================================
 
 function configurarSupabase() {
-  const url = (process.env.SUPABASE_URL || "")
-    .replace(/\/$/, "");
+  const url = (
+    process.env.SUPABASE_URL || ""
+  ).replace(/\/$/, "");
 
   const key =
     process.env.SUPABASE_SECRET_KEY ||
@@ -51,22 +86,21 @@ function configurarSupabase() {
     url,
     headers: {
       apikey: key,
-      ...(key.startsWith("sb_secret_")
-        ? {}
-        : { Authorization: `Bearer ${key}` })
+      ...(
+        key.startsWith("sb_secret_")
+          ? {}
+          : { Authorization: `Bearer ${key}` }
+      )
     }
   };
 }
 
 // ==========================================
-// 2. RECUPERAR TODAS LAS CAMPANAS
+// 2. RECUPERAR CAMPAÑAS
 // ==========================================
 
 async function obtenerCampanas() {
   const { url, headers } = configurarSupabase();
-
-  const todas = [];
-  const cantidadPorPagina = 500;
 
   const columnas = [
     "id",
@@ -81,9 +115,13 @@ async function obtenerCampanas() {
     "board_image"
   ].join(",");
 
-  for (let inicio = 0; inicio < 100000; inicio += cantidadPorPagina) {
-    const fin = inicio + cantidadPorPagina - 1;
+  const acumuladas = [];
 
+  for (
+    let inicio = 0;
+    inicio < 100000;
+    inicio += 500
+  ) {
     const parametros = new URLSearchParams({
       select: columnas,
       order: "id.asc"
@@ -95,191 +133,190 @@ async function obtenerCampanas() {
         method: "GET",
         headers: {
           ...headers,
-          Range: `${inicio}-${fin}`
+          Range: `${inicio}-${inicio + 499}`
         }
       },
       12000
     );
 
     if (!respuesta.ok) {
-      const detalle = await respuesta.text();
-
       throw new Error(
-        `Supabase respondió ${respuesta.status}: ` +
-        detalle.slice(0, 350)
+        `Error de Supabase (${respuesta.status}): ` +
+        (await respuesta.text()).slice(0, 220)
       );
     }
 
-    const registros = await respuesta.json();
+    const pagina = await respuesta.json();
 
-    if (!Array.isArray(registros)) {
-      throw new Error("Supabase devolvió un formato inválido.");
+    if (!Array.isArray(pagina)) {
+      throw new Error(
+        "Supabase devolvió datos inválidos."
+      );
     }
 
-    todas.push(...registros);
+    acumuladas.push(...pagina);
 
-    if (registros.length < cantidadPorPagina) {
+    if (pagina.length < 500) {
       break;
     }
   }
 
-  // Evitar que la IA confunda problemas de lectura
-  // con una base de datos vacía.
-  if (todas.length === 0) {
+  if (!acumuladas.length) {
     throw new Error(
       "Supabase devolvió 0 campañas. " +
-      "Revisa SUPABASE_URL, los permisos y la clave secreta."
+      "Revisa el proyecto, la clave y los permisos."
     );
   }
 
-  console.log("FESTIVAL AI - Campañas recuperadas:", todas.length);
+  console.log(
+    "Festival AI - Campañas recuperadas:",
+    acumuladas.length
+  );
 
-  return todas;
+  return acumuladas;
 }
 
 // ==========================================
 // 3. BUSQUEDA TRADICIONAL
 // ==========================================
 
-function obtenerPalabras(texto) {
-  const excluidas = new Set([
-    "para", "como", "esta", "este", "estos", "estas",
-    "campanas", "campana", "cuales", "quiero", "dame",
-    "busca", "analiza", "explica", "sobre", "entre",
-    "todas", "todos", "tiene", "tienen", "hacer",
-    "donde", "cuando", "porque", "desde", "hasta",
-    "ganaron", "ganadoras", "datos", "base", "dime",
-    "puedes", "ejemplos", "casos", "ideas", "algo",
-    "alguna", "alguno", "fueron", "fue", "son",
-    "con", "sin", "una", "uno", "los", "las",
-    "del", "por", "que", "sus", "hay", "mas",
-    "de", "la", "el", "en", "un", "al",
-    "lo", "le", "se", "me", "es", "no", "si"
-  ]);
+function palabrasClave(pregunta) {
+  const comunes = new Set(
+    [
+      "que", "cual", "cuales", "como", "para",
+      "por", "con", "los", "las", "una", "uno",
+      "sus", "del", "de", "la", "el", "en",
+      "un", "al", "y", "o", "se", "es",
+      "son", "fue", "donde", "cuando", "dame",
+      "busca", "campanas", "campana", "ejemplos",
+      "sobre", "entre", "quiero", "hay", "mas",
+      "me", "puedes", "analiza", "explicame",
+      "explicar", "ideas", "casos"
+    ]
+  );
 
-  return normalizar(texto)
-    .replace(/[^a-z0-9\s]/g, " ")
-    .split(/\s+/)
-    .filter(p => p.length >= 3 && !excluidas.has(p));
+  return [
+    ...new Set(
+      normalizar(pregunta)
+        .replace(/[^a-z0-9\s]/g, " ")
+        .split(/\s+/)
+        .filter(
+          p => p.length > 3 && !comunes.has(p)
+        )
+    )
+  ].slice(0, 18);
 }
 
-function buscarCampanas(campanas, pregunta) {
-  const consulta = normalizar(pregunta);
-  const palabras = obtenerPalabras(pregunta);
+function buscarTexto(campanas, pregunta) {
+  const tokens = palabrasClave(pregunta);
+  const normal = normalizar(pregunta);
+  const expansiones = [];
 
-  const sinonimos = [];
-
-  if (/gaming|videojuego|esport|gamificacion/.test(consulta)) {
-    sinonimos.push(
-      "gaming", "game", "gamer", "videojuego",
-      "fortnite", "minecraft", "esport", "twitch"
+  if (/particip|interactiv|experien/.test(normal)) {
+    expansiones.push(
+      "participation",
+      "interactive",
+      "experiential",
+      "engagement",
+      "activacion"
     );
   }
 
-  if (/cancer|tumor|oncolog|mama/.test(consulta)) {
-    sinonimos.push(
-      "cancer", "breast", "tumor",
-      "oncolog", "mammogram"
+  if (/videojueg|gamif|gaming/.test(normal)) {
+    expansiones.push(
+      "game",
+      "gaming",
+      "gamification",
+      "twitch"
     );
   }
 
-  if (/termograf|infrarroj|calor/.test(consulta)) {
-    sinonimos.push(
-      "termograf", "thermal", "infrared", "termic"
-    );
-  }
+  const hallazgos = campanas
+    .map(c => {
+      const titulo = normalizar(c.titulo);
+      const marca = normalizar(c.marca);
+      const agencia = normalizar(c.agencia);
+      const board = normalizar(c.analisis_board);
+      const categorias = normalizar(c.categorias);
+      const metales = normalizar(c.metales);
+      const festival = normalizar(c.festival);
 
-  if (/halloween|terror|miedo/.test(consulta)) {
-    sinonimos.push(
-      "halloween", "horror", "terror", "miedo"
-    );
-  }
+      let puntaje = 0;
 
-  if (/participativ|interactiv|experiencia/.test(consulta)) {
-    sinonimos.push(
-      "interactive", "participation", "participacion",
-      "experiencia", "interactivo", "activacion",
-      "engagement"
-    );
-  }
-
-  const anios = consulta.match(/\b20\d{2}\b/g) || [];
-
-  const festivales = [
-    "cannes",
-    "eurobest",
-    "dubai lynx",
-    "clio",
-    "el ojo",
-    "d&ad"
-  ].filter(f => consulta.includes(f));
-
-  const resultados = campanas.map(c => {
-    const titulo = normalizar(c.titulo);
-    const marca = normalizar(c.marca);
-    const board = normalizar(c.analisis_board);
-    const categorias = normalizar(c.categorias);
-    const metales = normalizar(c.metales);
-    const agencia = normalizar(c.agencia);
-    const festival = normalizar(c.festival);
-
-    let score = 0;
-
-    for (const palabra of palabras) {
-      if (titulo.includes(palabra)) score += 120;
-      if (marca.includes(palabra)) score += 100;
-      if (agencia.includes(palabra)) score += 65;
-      if (categorias.includes(palabra)) score += 60;
-      if (board.includes(palabra)) score += 45;
-    }
-
-    for (const sinonimo of sinonimos) {
-      if (titulo.includes(sinonimo)) score += 180;
-      if (categorias.includes(sinonimo)) score += 110;
-      if (board.includes(sinonimo)) score += 90;
-    }
-
-    if (anios.includes(String(c.anio))) {
-      score += 40;
-    }
-
-    for (const f of festivales) {
-      if (festival.includes(f)) score += 50;
-    }
-
-    for (const metal of [
-      "grand prix", "gold", "silver", "bronze"
-    ]) {
-      if (
-        consulta.includes(metal) &&
-        metales.includes(metal)
-      ) {
-        score += 150;
+      for (const t of tokens) {
+        if (titulo.includes(t)) puntaje += 100;
+        if (marca.includes(t)) puntaje += 85;
+        if (agencia.includes(t)) puntaje += 45;
+        if (categorias.includes(t)) puntaje += 40;
+        if (board.includes(t)) puntaje += 25;
       }
-    }
 
-    return { ...c, _score: score };
-  });
+      for (const t of expansiones) {
+        if (titulo.includes(t)) puntaje += 65;
+        if (board.includes(t)) puntaje += 35;
+      }
 
-  resultados.sort((a, b) => b._score - a._score);
+      if (
+        String(c.anio) &&
+        normal.includes(String(c.anio))
+      ) {
+        puntaje += 80;
+      }
 
-  const encontrados = resultados.filter(c => c._score > 0);
+      for (const f of [
+        "cannes",
+        "eurobest",
+        "dubai lynx"
+      ]) {
+        if (
+          normal.includes(f) &&
+          festival.includes(f)
+        ) {
+          puntaje += 75;
+        }
+      }
+
+      for (const m of [
+        "grand prix",
+        "gold",
+        "silver",
+        "bronze"
+      ]) {
+        if (
+          normal.includes(m) &&
+          metales.includes(m)
+        ) {
+          puntaje += 75;
+        }
+      }
+
+      return {
+        campana: c,
+        puntaje
+      };
+    })
+    .filter(x => x.puntaje > 0)
+    .sort((a, b) => b.puntaje - a.puntaje);
 
   return {
-    totalCoincidencias: encontrados.length,
-    seleccionadas: encontrados.slice(0, 20)
+    total: hallazgos.length,
+    registros: hallazgos
+      .slice(0, 10)
+      .map(x => x.campana)
   };
 }
 
 // ==========================================
-// 4. BUSQUEDA SEMANTICA CON GEMINI
+// 4. BUSQUEDA SEMANTICA CON PGVECTOR
 // ==========================================
 
 async function buscarSemanticas(pregunta) {
-  const geminiKey = process.env.GEMINI_API_KEY;
+  const clave = process.env.GEMINI_API_KEY;
 
-  if (!geminiKey) {
-    throw new Error("Falta GEMINI_API_KEY");
+  if (!clave) {
+    throw new Error(
+      "Falta GEMINI_API_KEY para embeddings."
+    );
   }
 
   const { url, headers } = configurarSupabase();
@@ -290,12 +327,14 @@ async function buscarSemanticas(pregunta) {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-goog-api-key": geminiKey
+        "x-goog-api-key": clave
       },
       body: JSON.stringify({
         model: "models/gemini-embedding-001",
         content: {
-          parts: [{ text: pregunta }]
+          parts: [{
+            text: pregunta.slice(0, 3000)
+          }]
         },
         taskType: "RETRIEVAL_QUERY",
         outputDimensionality: 768
@@ -304,33 +343,44 @@ async function buscarSemanticas(pregunta) {
     12000
   );
 
-  const datosEmbedding = await respuestaEmbedding.json();
+  const datosEmbedding =
+    await respuestaEmbedding.json();
 
   if (!respuestaEmbedding.ok) {
     throw new Error(
-      datosEmbedding.error?.message ||
-      "Gemini no pudo generar el embedding."
+      `Embedding ${respuestaEmbedding.status}: ` +
+      (datosEmbedding.error?.message || "")
     );
   }
 
-  const valores = datosEmbedding.embedding?.values;
+  const vector =
+    datosEmbedding.embedding?.values;
 
-  if (!Array.isArray(valores) || valores.length !== 768) {
-    throw new Error("Embedding de consulta inválido.");
+  if (
+    !Array.isArray(vector) ||
+    vector.length !== 768
+  ) {
+    throw new Error(
+      "Embedding de consulta inválido."
+    );
   }
 
   const norma = Math.sqrt(
-    valores.reduce((s, n) => s + n * n, 0)
+    vector.reduce(
+      (suma, valor) => suma + valor * valor,
+      0
+    )
   );
 
   if (!norma) {
-    throw new Error("Vector vacío.");
+    throw new Error("Embedding vacío.");
   }
 
-  const vector = valores.map(n => n / norma);
+  const normalizado = vector.map(
+    valor => valor / norma
+  );
 
-  // Consultar la función RPC de PostgreSQL
-  const respuesta = await fetchConTimeout(
+  const respuestaRPC = await fetchConTimeout(
     `${url}/rest/v1/rpc/buscar_campanas_semanticas`,
     {
       method: "POST",
@@ -339,59 +389,474 @@ async function buscarSemanticas(pregunta) {
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        query_embedding: JSON.stringify(vector),
-        cantidad: 20
+        query_embedding: JSON.stringify(
+          normalizado
+        ),
+        cantidad: 15
       })
     },
     12000
   );
 
-  const resultados = await respuesta.json();
+  const resultados = await respuestaRPC.json();
 
-  if (!respuesta.ok) {
+  if (!respuestaRPC.ok) {
     throw new Error(
-      resultados.message ||
-      `Error RPC ${respuesta.status}`
+      `pgvector ${respuestaRPC.status}: ` +
+      (resultados.message || "Error RPC")
     );
   }
 
   if (!Array.isArray(resultados)) {
-    throw new Error("Respuesta semántica inválida.");
+    throw new Error(
+      "Respuesta RPC inválida."
+    );
   }
 
   return resultados;
 }
 
 // ==========================================
-// 5. CONSTRUIR CONTEXTO PARA LA IA
+// 5. CONTEXTO DOCUMENTADO
 // ==========================================
 
 function construirContexto(campanas) {
   return campanas.map((c, i) => {
-    const analisis = String(c.analisis_board || "")
+    const board = String(
+      c.analisis_board || ""
+    )
       .replace(/\s+/g, " ")
-      .trim();
-
-    const limite = i < 5 ? 1500 : 600;
+      .slice(
+        0,
+        i < 3 ? 1100 : 650
+      );
 
     return [
-      `CASO ${i + 1}`,
-      `ID: ${c.id}`,
-      `TÍTULO: ${c.titulo || "Sin título"}`,
+      `CASO ${i + 1} | ID ${c.id}`,
+      `TITULO: ${c.titulo || "No registrado"}`,
       `MARCA: ${c.marca || "No registrada"}`,
-      `FESTIVAL: ${c.festival || "No registrado"}`,
-      `AÑO: ${c.anio || "No registrado"}`,
+      `FESTIVAL/AÑO: ${c.festival || "Sin dato"} / ${c.anio || "Sin dato"}`,
       `AGENCIA: ${c.agencia || "No registrada"}`,
-      `CATEGORÍAS: ${c.categorias || "No registradas"}`,
-      `PREMIOS: ${c.metales || "No registrados"}`,
-      `ANÁLISIS: ${analisis.slice(0, limite) || "No disponible"}`,
-      `ENLACE: ${c.board_image || "No disponible"}`
+      `CATEGORIAS: ${String(c.categorias || "Sin dato").slice(0, 180)}`,
+      `PREMIOS: ${String(c.metales || "Sin dato").slice(0, 180)}`,
+      `ANALISIS DOCUMENTADO: ${board || "No disponible"}`,
+      `BOARD: ${c.board_image || "No disponible"}`
     ].join("\n");
-  }).join("\n\n----------------------\n\n");
+  }).join("\n\n---\n\n");
 }
 
 // ==========================================
-// 6. FUNCION PRINCIPAL
+// 6. MANEJO DE ERRORES
+// ==========================================
+
+function esErrorAutenticacion(status) {
+  return status === 401 || status === 403;
+}
+
+// ==========================================
+// 7. GEMINI CON MODELOS ALTERNATIVOS
+// ==========================================
+
+async function llamarGemini(
+  prompt,
+  mensaje,
+  historial
+) {
+  const key = process.env.GEMINI_API_KEY;
+
+  if (!key) {
+    throw new Error("Falta GEMINI_API_KEY");
+  }
+
+  const errores = [];
+
+  for (const modelo of MODELOS_GEMINI) {
+    try {
+      const respuesta = await fetchConTimeout(
+        `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-goog-api-key": key
+          },
+          body: JSON.stringify({
+            contents: [{
+              role: "user",
+              parts: [{
+                text:
+                  `${prompt}\n\n` +
+                  `HISTORIAL RECIENTE:\n${historial}\n\n` +
+                  `PREGUNTA:\n${mensaje}`
+              }]
+            }],
+            generationConfig: {
+              temperature: 0.2,
+              maxOutputTokens: 1300
+            }
+          })
+        },
+        8500
+      );
+
+      const data = await respuesta.json();
+
+      if (!respuesta.ok) {
+        console.warn(
+          "Gemini",
+          modelo,
+          respuesta.status,
+          String(
+            data.error?.message || ""
+          ).slice(0, 180)
+        );
+
+        errores.push(
+          `${modelo}: ${respuesta.status}`
+        );
+
+        if (
+          esErrorAutenticacion(
+            respuesta.status
+          )
+        ) {
+          break;
+        }
+
+        continue;
+      }
+
+      const texto = data.candidates?.[0]
+        ?.content?.parts
+        ?.map(p => p.text || "")
+        .join("")
+        .trim();
+
+      if (texto) {
+        return {
+          respuesta: texto,
+          modelo,
+          proveedor: "gemini"
+        };
+      }
+
+      errores.push(
+        `${modelo}: respuesta vacía`
+      );
+
+    } catch (error) {
+      errores.push(
+        `${modelo}: ${error.name || "error"}`
+      );
+    }
+  }
+
+  throw new Error(
+    `Gemini sin respuesta (${errores.join("; ")})`
+  );
+}
+
+// ==========================================
+// 8. GROQ Y OPENROUTER
+// ==========================================
+
+async function llamarChatCompatible(
+  endpoint,
+  key,
+  modelos,
+  prompt,
+  mensaje,
+  historial,
+  proveedor
+) {
+  if (!key?.trim()) {
+    throw new Error(
+      proveedor === "groq"
+        ? "Falta GROQ_API_KEY en Vercel"
+        : "Falta OPENROUTER_API_KEY en Vercel"
+    );
+  }
+
+  const mensajes = [
+    {
+      role: "system",
+      content: prompt
+    },
+    ...(
+      historial
+        ? [{
+            role: "user",
+            content:
+              `Contexto reciente: ${historial}`
+          }]
+        : []
+    ),
+    {
+      role: "user",
+      content: mensaje
+    }
+  ];
+
+  const errores = [];
+
+  for (const modelo of modelos) {
+    try {
+      const respuesta = await fetchConTimeout(
+        endpoint,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization:
+              `Bearer ${key.trim()}`,
+            ...(
+              proveedor === "openrouter"
+                ? {
+                    "HTTP-Referer":
+                      "https://festival-ai.vercel.app",
+                    "X-OpenRouter-Title":
+                      "Festival AI"
+                  }
+                : {}
+            )
+          },
+          body: JSON.stringify({
+            model: modelo,
+            messages: mensajes,
+            temperature: 0.2,
+            max_tokens: 1100,
+            stream: false
+          })
+        },
+        10000
+      );
+
+      const data = await respuesta.json();
+
+      if (!respuesta.ok) {
+        const detalle = String(
+          data.error?.message ||
+          JSON.stringify(data)
+        ).slice(0, 250);
+
+        console.warn(
+          proveedor,
+          modelo,
+          respuesta.status,
+          detalle
+        );
+
+        errores.push(
+          `${modelo}: HTTP ${respuesta.status} ${detalle}`
+        );
+
+        if (
+          esErrorAutenticacion(
+            respuesta.status
+          )
+        ) {
+          break;
+        }
+
+        continue;
+      }
+
+      const salida =
+        data.choices?.[0]?.message?.content;
+
+      const texto =
+        typeof salida === "string"
+          ? salida.trim()
+          : Array.isArray(salida)
+            ? salida
+                .map(x => x?.text || "")
+                .join("")
+                .trim()
+            : "";
+
+      if (texto) {
+        return {
+          respuesta: texto,
+          modelo: data.model || modelo,
+          proveedor
+        };
+      }
+
+      errores.push(
+        `${modelo}: respuesta vacía`
+      );
+
+    } catch (error) {
+      errores.push(
+        `${modelo}: ${error.name || "error"}`
+      );
+    }
+  }
+
+  throw new Error(
+    `${proveedor} sin respuesta (${errores.join("; ")})`
+  );
+}
+
+// ==========================================
+// 9. OPENROUTER AUTOMATICO
+// ==========================================
+
+// Consulta modelos gratuitos que existen
+// actualmente en OpenRouter.
+// La lista se actualiza cada 30 minutos.
+
+async function descubrirModelosOpenRouter() {
+  if (
+    cacheCatalogoOpenRouter.expira > Date.now()
+  ) {
+    return cacheCatalogoOpenRouter.modelos;
+  }
+
+  const respuesta = await fetchConTimeout(
+    "https://openrouter.ai/api/v1/models?output_modalities=text",
+    {},
+    6000
+  );
+
+  if (!respuesta.ok) {
+    throw new Error(
+      "No se pudo consultar el catálogo de OpenRouter: " +
+      respuesta.status
+    );
+  }
+
+  const datos = await respuesta.json();
+
+  const modelos = (
+    Array.isArray(datos.data)
+      ? datos.data
+      : []
+  )
+    .filter(m =>
+      typeof m.id === "string" &&
+      m.id.endsWith(":free") &&
+      Number(m.pricing?.prompt) === 0 &&
+      Number(m.pricing?.completion) === 0 &&
+      (m.context_length || 0) >= 8192 &&
+      (
+        !m.architecture?.output_modalities ||
+        m.architecture.output_modalities.includes(
+          "text"
+        )
+      )
+    )
+    .sort((a, b) => {
+      const prioridad = id => {
+        if (/gemma-4-31b/i.test(id)) {
+          return 100;
+        }
+
+        if (/gemma-4-26b/i.test(id)) {
+          return 95;
+        }
+
+        if (/nemotron-3-ultra/i.test(id)) {
+          return 90;
+        }
+
+        if (/nemotron-3.5-lightning/i.test(id)) {
+          return 80;
+        }
+
+        return 0;
+      };
+
+      return (
+        prioridad(b.id) -
+        prioridad(a.id) ||
+        (b.context_length || 0) -
+        (a.context_length || 0)
+      );
+    })
+    .map(m => m.id)
+    .slice(0, 4);
+
+  cacheCatalogoOpenRouter = {
+    modelos,
+    expira:
+      Date.now() + 30 * 60 * 1000
+  };
+
+  return modelos;
+}
+
+async function llamarOpenRouter(
+  prompt,
+  mensaje,
+  historial
+) {
+  const key =
+    process.env.OPENROUTER_API_KEY;
+
+  if (!key?.trim()) {
+    throw new Error(
+      "Falta OPENROUTER_API_KEY en Vercel."
+    );
+  }
+
+  const endpoint =
+    "https://openrouter.ai/api/v1/chat/completions";
+
+  // Intento 1: selección gratuita automática.
+  try {
+    return await llamarChatCompatible(
+      endpoint,
+      key,
+      ["openrouter/free"],
+      prompt,
+      mensaje,
+      historial,
+      "openrouter"
+    );
+
+  } catch (errorPrimario) {
+    // Si la clave es inválida, otro
+    // modelo no solucionará el problema.
+    if (
+      /HTTP 401|HTTP 403/.test(
+        errorPrimario.message
+      )
+    ) {
+      throw errorPrimario;
+    }
+
+    console.warn(
+      "OpenRouter automático:",
+      errorPrimario.message.slice(0, 300)
+    );
+  }
+
+  // Intento 2: obtener modelos gratuitos
+  // directamente del catálogo actualizado.
+  const modelos =
+    await descubrirModelosOpenRouter();
+
+  if (!modelos.length) {
+    throw new Error(
+      "No hay modelos gratuitos apropiados " +
+      "en el catálogo actual de OpenRouter."
+    );
+  }
+
+  return llamarChatCompatible(
+    endpoint,
+    key,
+    modelos,
+    prompt,
+    mensaje,
+    historial,
+    "openrouter"
+  );
+}
+
+// ==========================================
+// 10. FUNCION PRINCIPAL DE VERCEL
 // ==========================================
 
 export default async function handler(req, res) {
@@ -401,59 +866,63 @@ export default async function handler(req, res) {
     });
   }
 
-  const { mensaje, historial = [] } = req.body || {};
+  const {
+    mensaje,
+    historial = []
+  } = req.body || {};
 
-  if (!mensaje || typeof mensaje !== "string") {
+  if (
+    typeof mensaje !== "string" ||
+    !mensaje.trim()
+  ) {
     return res.status(400).json({
       error: "Escribe una consulta válida."
     });
   }
 
-  const geminiKey = process.env.GEMINI_API_KEY;
-  const groqKey = process.env.GROQ_API_KEY;
-  const openrouterKey = process.env.OPENROUTER_API_KEY;
-
-  const estrategia = req.headers["x-strategy"] || "auto";
-
-  if (!geminiKey && !groqKey && !openrouterKey) {
+  if (
+    !process.env.GEMINI_API_KEY &&
+    !process.env.GROQ_API_KEY &&
+    !process.env.OPENROUTER_API_KEY
+  ) {
     return res.status(500).json({
-      error: "No hay claves API configuradas en Vercel."
+      error:
+        "No hay proveedores de IA configurados."
     });
   }
 
   try {
     // ======================================
-    // RECUPERAR BASE COMPLETA
+    // RECUPERAR CAMPAÑAS
     // ======================================
 
     const campanas = await obtenerCampanas();
 
-    console.log("FESTIVAL AI - DIAGNOSTICO", {
-      totalCampanas: campanas.length,
-      proyecto: new URL(process.env.SUPABASE_URL).hostname
-    });
+    console.log(
+      "Festival AI - Total:",
+      campanas.length
+    );
+
+    const pregunta = normalizar(mensaje);
 
     // ======================================
-    // DETECTAR PREGUNTAS DE CONTEO
+    // CONSULTAS DE CONTEO
     // ======================================
-
-    const preguntaNorm = normalizar(mensaje);
 
     if (
       /cuantas campanas|cuantos registros|total de campanas/.test(
-        preguntaNorm
+        pregunta
       ) &&
-      !/marca|festival|agencia|categoria|premio|ano|año/.test(
-        preguntaNorm
+      !/marca|festival|agencia|categoria|premio|ano/.test(
+        pregunta
       )
     ) {
       return res.status(200).json({
         respuesta:
           `Actualmente tengo **${campanas.length.toLocaleString("es-PE")} campañas publicitarias** registradas en Supabase.`,
         registrosTotales: campanas.length,
-        coincidencias: campanas.length,
-        casosAnalizados: 0,
-        busquedaSemantica: "no necesaria"
+        busquedaSemantica: "no necesaria",
+        casosAnalizados: 0
       });
     }
 
@@ -461,55 +930,47 @@ export default async function handler(req, res) {
     // HISTORIAL
     // ======================================
 
-    const historialSeguro = Array.isArray(historial)
-      ? historial.slice(-6).filter(m =>
-          ["user", "assistant"].includes(m.role) &&
-          typeof m.content === "string"
-        )
-      : [];
+    const historialSeguro =
+      Array.isArray(historial)
+        ? historial
+            .slice(-4)
+            .filter(m =>
+              ["user", "assistant"].includes(
+                m.role
+              ) &&
+              typeof m.content === "string"
+            )
+        : [];
 
-    const consultasPrevias = historialSeguro
-      .filter(m => m.role === "user")
-      .slice(-2)
-      .map(m => m.content)
-      .join(" ");
-
-    const consultaCompleta =
-      `${consultasPrevias} ${mensaje}`.trim();
+    const resumenHistorial = historialSeguro
+      .map(m =>
+        `${m.role}: ${m.content.slice(0, 300)}`
+      )
+      .join("\n")
+      .slice(0, 1000);
 
     // ======================================
-    // BUSQUEDA TRADICIONAL
+    // BUSQUEDA HIBRIDA
     // ======================================
 
-    const busqueda = buscarCampanas(
+    const busquedaTexto = buscarTexto(
       campanas,
-      consultaCompleta
+      mensaje
     );
 
-    // ======================================
-    // BUSQUEDA SEMANTICA
-    // ======================================
-
-    let casosSemanticos = [];
-    let estadoSemantico = "pendiente";
+    let semanticas = [];
+    let estadoSemantico = "correcta";
 
     try {
-      casosSemanticos = await buscarSemanticas(
-        consultaCompleta
-      );
-
-      estadoSemantico = "correcta";
-
-      console.log(
-        "FESTIVAL AI - Resultados semánticos:",
-        casosSemanticos.length
+      semanticas = await buscarSemanticas(
+        mensaje
       );
 
     } catch (error) {
       estadoSemantico = "fallo";
 
-      console.error(
-        "FESTIVAL AI - Error semántico:",
+      console.warn(
+        "Festival AI - Búsqueda semántica:",
         error.message
       );
     }
@@ -519,401 +980,206 @@ export default async function handler(req, res) {
     // ======================================
 
     const porId = new Map(
-      campanas.map(c => [String(c.id), c])
+      campanas.map(c => [
+        String(c.id),
+        c
+      ])
     );
 
     const seleccionadas = [];
-    const idsIncluidos = new Set();
+    const vistos = new Set();
 
-    const resultadosCombinados = [
-      ...casosSemanticos.map(r =>
+    const resultados = [
+      ...semanticas.map(r =>
         porId.get(String(r.id)) || r
       ),
-      ...busqueda.seleccionadas
+      ...busquedaTexto.registros
     ];
 
-    for (const campana of resultadosCombinados) {
+    for (const campana of resultados) {
       if (!campana) continue;
 
       const id = String(campana.id);
 
-      if (idsIncluidos.has(id)) continue;
+      if (vistos.has(id)) {
+        continue;
+      }
 
-      idsIncluidos.add(id);
+      vistos.add(id);
       seleccionadas.push(campana);
 
-      if (seleccionadas.length >= 20) break;
+      // Máximo de 8 campañas por consulta.
+      // Evita exceder límites de Groq.
+      if (seleccionadas.length >= 8) {
+        break;
+      }
     }
 
-    const contexto = construirContexto(seleccionadas);
-
-    console.log("FESTIVAL AI - RECUPERACION", {
-      registrosTotales: campanas.length,
-      coincidenciasTextuales: busqueda.totalCoincidencias,
-      resultadosSemanticos: casosSemanticos.length,
-      casosSeleccionados: seleccionadas.length,
-      estadoSemantico
-    });
+    console.log(
+      "Festival AI - Recuperación:",
+      {
+        registrosTotales: campanas.length,
+        coincidenciasTextuales:
+          busquedaTexto.total,
+        resultadosSemanticos:
+          semanticas.length,
+        casosSeleccionados:
+          seleccionadas.length,
+        estadoSemantico
+      }
+    );
 
     // ======================================
     // INSTRUCCIONES DEL JURADO
     // ======================================
 
-    const promptSistema = `
-    
-REGLAS PRIORITARIAS DE PRECISION PUBLICITARIA:
-
-Eres un investigador riguroso de campañas publicitarias.
-Tu objetivo es analizar creatividad, no inventar ejecuciones.
-
-1. FUENTES:
-Solo puedes presentar como hechos los datos que estén
-incluidos en los registros recuperados de Supabase.
-
-2. NO INVENTAR:
-Nunca inventes aplicaciones, plataformas, tecnologías,
-acciones, mecánicas, resultados, porcentajes, premios,
-agencias o participaciones del público.
-
-3. PROBLEMA:
-Identifica el problema que resolvió la campaña.
-Si el registro no lo explica, indica que no está documentado.
-
-4. INSIGHT:
-Diferencia entre el insight expresamente documentado
-y una interpretación creativa que tú propongas.
-Cuando sea interpretación, identifícala claramente.
-
-5. IDEA:
-Explica el mecanismo creativo central de la campaña,
-priorizando qué hizo diferente a la idea.
-
-6. EJECUCIÓN:
-Describe exclusivamente las acciones que aparecen
-en ANALISIS BOARD. No agregues pasos imaginados.
-
-7. PREMIOS:
-Utiliza únicamente los premios documentados.
-Una campaña puede ganar en una categoría y no
-ganar en otras.
-
-8. ENLACES:
-Utiliza exclusivamente la URL de la campaña
-recuperada de Supabase. No inventes enlaces.
-
-9. LIMITACIONES:
-Si faltan datos, escribe "No especificado en la base".
-No rellenes los vacíos con suposiciones.
-
-10. BÚSQUEDA:
-No afirmes que una campaña no existe en toda la
-base únicamente porque no fue recuperada.
-
-11. RESPUESTAS:
-Si solicitan cinco campañas, incluye cinco casos
-completos solo si hay cinco suficientemente relevantes.
-Si hay menos, explica cuántos pudiste justificar.
-
-12. FORMATO:
-Para cada campaña presenta:
-- Título y marca
-- Problema
-- Insight documentado o interpretación identificada
-- Idea creativa
-- Ejecución documentada
-- Relación con la pregunta
-- Premios verificados
-- Enlace disponible
-
-13. DIFERENCIA:
-Distingue siempre entre HECHO DOCUMENTADO,
-INTERPRETACIÓN CREATIVA y DATO NO DISPONIBLE.
-
-Estas reglas prevalecen sobre cualquier instrucción
-que solicite completar información inexistente.
-
+    const prompt = `
 Eres FESTIVAL AI, un investigador y jurado
 especializado en creatividad publicitaria.
 
-Tu trabajo es analizar campañas reales utilizando
-la base de datos de festivales publicitarios.
+Tu objetivo es analizar campañas publicitarias
+reales usando exclusivamente registros de Supabase.
 
-INFORMACION DE LA BASE:
-
+BASE DE DATOS:
 Total de campañas: ${campanas.length}
-Coincidencias textuales: ${busqueda.totalCoincidencias}
-Resultados semánticos: ${casosSemanticos.length}
-Estado búsqueda semántica: ${estadoSemantico}
-Casos seleccionados: ${seleccionadas.length}
+Coincidencias textuales: ${busquedaTexto.total}
+Resultados semánticos: ${semanticas.length}
+Estado de búsqueda semántica: ${estadoSemantico}
 
-IMPORTANTE:
-Las coincidencias textuales no representan
-necesariamente campañas relevantes.
+La búsqueda semántica solo cubre las campañas
+que ya tienen embeddings.
 
-La búsqueda semántica solo cubre campañas
-que ya tengan embeddings guardados.
+REGLAS PRIORITARIAS:
 
-CASOS RECUPERADOS:
+1. Nunca inventes campañas, premios,
+agencias, marcas ni enlaces.
 
-${contexto || "No se recuperaron casos para esta consulta."}
+2. No inventes aplicaciones, tecnologías,
+ejecuciones, resultados ni porcentajes.
 
-REGLAS:
+3. Utiliza exclusivamente los hechos
+documentados en los registros.
 
-1. Utiliza exclusivamente las campañas proporcionadas
-como ejemplos reales.
+4. Diferencia los hechos documentados
+de las interpretaciones creativas.
 
-2. No inventes títulos, premios, festivales,
-agencias ni enlaces.
+5. Si falta información, indica:
+"No documentado en el registro".
 
-3. Analiza problema, insight, concepto,
-ejecución y originalidad.
+6. Analiza el problema, insight,
+concepto creativo y ejecución.
 
-4. Identifica semejanzas creativas entre campañas.
+7. Explica por qué una idea es original.
 
-5. Diferencia Grand Prix, Gold, Silver,
-Bronze, Shortlist y NO GANO.
+8. Identifica similitudes y diferencias
+entre campañas cuando corresponda.
 
-6. Una campaña puede ganar en una categoría
-y no ganar en otras.
+9. Diferencia Grand Prix, Gold,
+Silver, Bronze, Shortlist y NO GANO.
 
-7. Si se solicita un enlace, utiliza
-el enlace real del registro.
+10. Una campaña puede ganar en una
+categoría y no ganar en otras.
 
-8. No afirmes que una campaña no existe
-solo porque no fue recuperada.
+11. Nunca inventes enlaces.
+Usa solamente el board registrado.
 
-9. Si no hay casos suficientes, indica que
-la recuperación fue limitada.
+12. No afirmes que una campaña no existe
+porque no apareció en los resultados.
 
-10. No presentes los resultados semánticos
-como una búsqueda exhaustiva de toda la base.
+13. No presentes búsquedas parciales
+como si fueran exhaustivas.
 
-11. Prioriza explicaciones claras, concretas
-y útiles para desarrollar ideas publicitarias.
+14. Responde en español, con claridad.
 
-12. Responde en español.
+15. Si solicitan cinco campañas,
+presenta hasta cinco casos documentados.
+No inventes casos para completar la lista.
+
+16. Evita tablas innecesariamente extensas.
+
+CAMPAÑAS RECUPERADAS:
+
+${construirContexto(seleccionadas) || "No se recuperaron casos."}
 `;
 
-    const mensajes = [
-      { role: "system", content: promptSistema },
-      ...historialSeguro,
-      { role: "user", content: mensaje }
-    ];
-
     // ======================================
-    // GROQ Y OPENROUTER
+    // ELEGIR PROVEEDOR
     // ======================================
 
-    async function llamarOpenAICompatible(
-      endpoint,
-      key,
-      modelos,
-      proveedor
-    ) {
-      if (!key) {
-        throw new Error(`Sin clave de ${proveedor}`);
-      }
+    const preferencia = String(
+      req.headers["x-strategy"] || "auto"
+    ).toLowerCase();
 
-      for (const modelo of modelos) {
-        try {
-          const respuesta = await fetchConTimeout(
-            endpoint,
-            {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${key}`,
-                ...(proveedor === "OpenRouter"
-                  ? {
-                      "HTTP-Referer":
-                        "https://festival-ai.vercel.app",
-                      "X-Title": "Festival AI"
-                    }
-                  : {})
-              },
-              body: JSON.stringify({
-                model: modelo,
-                messages: mensajes,
-                temperature: 0.2,
-                max_tokens: 1600
-              })
-            },
-            12000
-          );
-
-          const data = await respuesta.json();
-
-          if (!respuesta.ok) {
-            console.warn(
-              proveedor,
-              modelo,
-              respuesta.status,
-              data.error?.message || ""
-            );
-            continue;
-          }
-
-          const texto =
-            data.choices?.[0]?.message?.content;
-
-          if (typeof texto === "string" && texto.trim()) {
-            return texto;
-          }
-
-        } catch (error) {
-          console.warn(
-            proveedor,
-            modelo,
-            error.message
-          );
-        }
-      }
-
-      throw new Error(
-        `No hubo respuesta válida de ${proveedor}`
-      );
-    }
-
-    // ======================================
-    // GEMINI
-    // ======================================
-
-    async function llamarGemini() {
-      if (!geminiKey) {
-        throw new Error("Sin clave Gemini");
-      }
-
-      const modelos = [
-        "gemini-2.5-flash",
-        "gemini-2.5-flash-lite"
-      ];
-
-      for (const modelo of modelos) {
-        try {
-          const respuesta = await fetchConTimeout(
-            `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent`,
-            {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                "x-goog-api-key": geminiKey
-              },
-              body: JSON.stringify({
-                contents: [{
-                  role: "user",
-                  parts: [{
-                    text:
-                      `${promptSistema}\n\n` +
-                      `HISTORIAL:\n` +
-                      historialSeguro.map(m =>
-                        `${m.role}: ${m.content}`
-                      ).join("\n") +
-                      `\n\nCONSULTA ACTUAL:\n${mensaje}`
-                  }]
-                }],
-                generationConfig: {
-                  temperature: 0.2,
-                  maxOutputTokens: 2000
-                }
-              })
-            },
-            12000
-          );
-
-          const data = await respuesta.json();
-
-          if (!respuesta.ok) {
-            console.warn(
-              "Gemini",
-              modelo,
-              respuesta.status,
-              data.error?.message || ""
-            );
-            continue;
-          }
-
-          const texto = data.candidates?.[0]?.content?.parts
-            ?.map(p => p.text || "")
-            .join("");
-
-          if (texto?.trim()) return texto;
-
-        } catch (error) {
-          console.warn(
-            "Gemini",
-            modelo,
-            error.message
-          );
-        }
-      }
-
-      throw new Error("Gemini no respondió.");
-    }
-
-    async function llamarGroq() {
-      return llamarOpenAICompatible(
-        "https://api.groq.com/openai/v1/chat/completions",
-        groqKey,
-        [
-          "openai/gpt-oss-120b",
-          "openai/gpt-oss-20b"
-        ],
-        "Groq"
-      );
-    }
-
-    async function llamarOpenRouter() {
-      return llamarOpenAICompatible(
-        "https://openrouter.ai/api/v1/chat/completions",
-        openrouterKey,
-        [
-          "openrouter/free",
-          "google/gemma-3-27b-it:free"
-        ],
-        "OpenRouter"
-      );
-    }
-
-    // ======================================
-    // CASCADA AUTOMATICA DE MODELOS
-    // ======================================
+    const orden =
+      preferencia === "auto"
+        ? [
+            "gemini",
+            "groq",
+            "openrouter"
+          ]
+        : [preferencia];
 
     const proveedores = {
-      gemini: llamarGemini,
-      groq: llamarGroq,
-      openrouter: llamarOpenRouter
+      gemini: () => llamarGemini(
+        prompt,
+        mensaje,
+        resumenHistorial
+      ),
+
+      groq: () => llamarChatCompatible(
+        "https://api.groq.com/openai/v1/chat/completions",
+        process.env.GROQ_API_KEY,
+        MODELOS_GROQ,
+        prompt,
+        mensaje,
+        resumenHistorial,
+        "groq"
+      ),
+
+      openrouter: () => llamarOpenRouter(
+        prompt,
+        mensaje,
+        resumenHistorial
+      )
     };
 
-    const orden = estrategia === "auto"
-      ? ["gemini", "groq", "openrouter"]
-      : [estrategia];
-
-    let respuestaTexto = null;
-    let proveedorUtilizado = null;
+    let resultado = null;
     const errores = [];
 
-    for (const proveedor of orden) {
-      if (!proveedores[proveedor]) continue;
+    // ======================================
+    // RESPALDO AUTOMATICO
+    // ======================================
+
+    for (const nombre of orden) {
+      if (!proveedores[nombre]) {
+        continue;
+      }
 
       try {
-        respuestaTexto = await proveedores[proveedor]();
+        resultado =
+          await proveedores[nombre]();
 
-        if (respuestaTexto) {
-          proveedorUtilizado = proveedor;
+        if (resultado?.respuesta) {
           break;
         }
 
       } catch (error) {
+        console.warn(
+          "Festival AI - Proveedor:",
+          nombre,
+          error.message.slice(0, 420)
+        );
+
         errores.push(
-          `${proveedor}: ${error.message}`
+          `${nombre}: ${error.message.slice(0, 220)}`
         );
       }
     }
 
-    if (!respuestaTexto) {
+    if (!resultado) {
       throw new Error(
-        "Ningún proveedor respondió. " +
-        errores.join("; ")
+        "Ningún proveedor respondió: " +
+        errores.join(" | ")
       );
     }
 
@@ -922,23 +1188,39 @@ y útiles para desarrollar ideas publicitarias.
     // ======================================
 
     return res.status(200).json({
-      respuesta: respuestaTexto,
-      registrosTotales: campanas.length,
-      coincidencias: busqueda.totalCoincidencias,
-      casosSemanticos: casosSemanticos.length,
-      casosAnalizados: seleccionadas.length,
-      busquedaSemantica: estadoSemantico,
-      proveedor: proveedorUtilizado
+      respuesta: resultado.respuesta,
+
+      registrosTotales:
+        campanas.length,
+
+      coincidencias:
+        busquedaTexto.total,
+
+      casosSemanticos:
+        semanticas.length,
+
+      casosAnalizados:
+        seleccionadas.length,
+
+      busquedaSemantica:
+        estadoSemantico,
+
+      proveedor:
+        resultado.proveedor,
+
+      modelo:
+        resultado.modelo
     });
 
   } catch (error) {
     console.error(
-      "FESTIVAL AI - ERROR GENERAL:",
-      error
+      "FESTIVAL AI - ERROR:",
+      error.message
     );
 
     return res.status(500).json({
-      error: error.message ||
+      error:
+        error.message ||
         "Error interno del servidor."
     });
   }
