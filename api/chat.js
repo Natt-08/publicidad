@@ -286,14 +286,139 @@ export default async function handler(req, res) {
       .map(m => m.content)
       .join(" ");
 
-    const busqueda = buscarCampanas(
-      campanas,
-      `${consultasPrevias} ${mensaje}`
-    );
 
-    const contexto = construirContexto(
-      busqueda.seleccionadas
+const busqueda = buscarCampanas(
+  campanas,
+  `${consultasPrevias} ${mensaje}`
+);
+
+// Búsqueda semántica usando Gemini y pgvector
+let casosSemanticos = [];
+
+try {
+  const geminiKeySemantica = process.env.GEMINI_API_KEY;
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const supabaseKey =
+    process.env.SUPABASE_SECRET_KEY ||
+    process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!geminiKeySemantica || !supabaseUrl || !supabaseKey) {
+    throw new Error("Faltan claves para búsqueda semántica");
+  }
+
+  // Convertir la pregunta en un vector de 768 dimensiones
+  const respuestaEmbedding = await fetchConTimeout(
+    "https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": geminiKeySemantica
+      },
+      body: JSON.stringify({
+        model: "models/gemini-embedding-001",
+        content: {
+          parts: [{ text: mensaje }]
+        },
+        taskType: "RETRIEVAL_QUERY",
+        outputDimensionality: 768
+      })
+    },
+    12000
+  );
+
+  const datosEmbedding = await respuestaEmbedding.json();
+
+  if (!respuestaEmbedding.ok) {
+    throw new Error(
+      datosEmbedding.error?.message || "Error de Gemini Embedding"
     );
+  }
+
+  const valores = datosEmbedding.embedding?.values;
+
+  if (!Array.isArray(valores) || valores.length !== 768) {
+    throw new Error("Embedding de consulta inválido");
+  }
+
+  // Normalizar el vector
+  const norma = Math.sqrt(
+    valores.reduce((s, n) => s + n * n, 0)
+  );
+
+  if (!norma) throw new Error("Vector vacío");
+
+  const vector = valores.map(n => n / norma);
+
+  // Buscar campañas similares en Supabase
+  const respuestaBusqueda = await fetchConTimeout(
+    `${supabaseUrl.replace(/\/$/, "")}/rest/v1/rpc/buscar_campanas_semanticas`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: supabaseKey,
+        ...(
+          supabaseKey.startsWith("sb_secret_")
+            ? {}
+            : { Authorization: `Bearer ${supabaseKey}` }
+        )
+      },
+      body: JSON.stringify({
+        query_embedding: vector,
+        cantidad: 20
+      })
+    },
+    12000
+  );
+
+  const resultados = await respuestaBusqueda.json();
+
+  if (!respuestaBusqueda.ok) {
+    throw new Error(
+      resultados.message || "Error en búsqueda vectorial"
+    );
+  }
+
+  if (!Array.isArray(resultados)) {
+    throw new Error("Resultados semánticos inválidos");
+  }
+
+  // Recuperar los registros completos de las campañas
+  const porId = new Map(
+    campanas.map(c => [String(c.id), c])
+  );
+
+  casosSemanticos = resultados
+    .map(r => porId.get(String(r.id)) || r)
+    .filter(Boolean);
+
+} catch (error) {
+  console.warn("Búsqueda semántica:", error.message);
+}
+
+// Combinar búsqueda semántica y búsqueda tradicional
+const seleccionadas = [];
+const idsIncluidos = new Set();
+
+for (const campana of [
+  ...casosSemanticos,
+  ...busqueda.seleccionadas
+]) {
+  const id = String(campana.id);
+
+  if (!idsIncluidos.has(id)) {
+    idsIncluidos.add(id);
+    seleccionadas.push(campana);
+  }
+
+  if (seleccionadas.length >= 20) break;
+}
+
+busqueda.seleccionadas = seleccionadas;
+
+const contexto = construirContexto(seleccionadas);
+
 
     const promptSistema = `
 Eres FESTIVAL AI, un investigador y jurado especializado
