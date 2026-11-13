@@ -3,7 +3,10 @@ export const config = {
   maxDuration: 60
 };
 
-// Normalizar texto para buscar coincidencias
+// ==========================================
+// FESTIVAL AI - SUPABASE + BUSQUEDA SEMANTICA
+// ==========================================
+
 function normalizar(texto) {
   return String(texto || "")
     .normalize("NFD")
@@ -12,7 +15,6 @@ function normalizar(texto) {
     .trim();
 }
 
-// Hacer peticiones con tiempo máximo de espera
 async function fetchConTimeout(url, opciones, tiempo = 12000) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), tiempo);
@@ -27,8 +29,11 @@ async function fetchConTimeout(url, opciones, tiempo = 12000) {
   }
 }
 
-// Obtener todas las campañas de Supabase
-async function obtenerCampanas() {
+// ==========================================
+// 1. CONFIGURACION DE SUPABASE
+// ==========================================
+
+function configurarSupabase() {
   const url = (process.env.SUPABASE_URL || "")
     .replace(/\/$/, "");
 
@@ -42,40 +47,73 @@ async function obtenerCampanas() {
     );
   }
 
+  return {
+    url,
+    headers: {
+      apikey: key,
+      ...(key.startsWith("sb_secret_")
+        ? {}
+        : { Authorization: `Bearer ${key}` })
+    }
+  };
+}
+
+// ==========================================
+// 2. RECUPERAR TODAS LAS CAMPANAS
+// ==========================================
+
+async function obtenerCampanas() {
+  const { url, headers } = configurarSupabase();
+
   const todas = [];
   const cantidadPorPagina = 500;
 
+  const columnas = [
+    "id",
+    "titulo",
+    "marca",
+    "festival",
+    "anio",
+    "categorias",
+    "metales",
+    "agencia",
+    "analisis_board",
+    "board_image"
+  ].join(",");
+
   for (let inicio = 0; inicio < 100000; inicio += cantidadPorPagina) {
+    const fin = inicio + cantidadPorPagina - 1;
+
     const parametros = new URLSearchParams({
-      select: "titulo,marca,festival,anio,categorias,metales,agencia,analisis_board,board_image",
-      order: "id.asc",
-      offset: String(inicio),
-      limit: String(cantidadPorPagina)
+      select: columnas,
+      order: "id.asc"
     });
 
     const respuesta = await fetchConTimeout(
       `${url}/rest/v1/campanas?${parametros}`,
       {
+        method: "GET",
         headers: {
-          apikey: key,
-          ...(key.startsWith("sb_secret_")
-            ? {}
-            : { Authorization: `Bearer ${key}` })
+          ...headers,
+          Range: `${inicio}-${fin}`
         }
-      }
+      },
+      12000
     );
 
     if (!respuesta.ok) {
       const detalle = await respuesta.text();
+
       throw new Error(
-        `Supabase respondió ${respuesta.status}: ${detalle.slice(0, 250)}`
+        `Supabase respondió ${respuesta.status}: ` +
+        detalle.slice(0, 350)
       );
     }
 
     const registros = await respuesta.json();
 
     if (!Array.isArray(registros)) {
-      throw new Error("Respuesta inválida de Supabase.");
+      throw new Error("Supabase devolvió un formato inválido.");
     }
 
     todas.push(...registros);
@@ -85,10 +123,24 @@ async function obtenerCampanas() {
     }
   }
 
+  // Evitar que la IA confunda problemas de lectura
+  // con una base de datos vacía.
+  if (todas.length === 0) {
+    throw new Error(
+      "Supabase devolvió 0 campañas. " +
+      "Revisa SUPABASE_URL, los permisos y la clave secreta."
+    );
+  }
+
+  console.log("FESTIVAL AI - Campañas recuperadas:", todas.length);
+
   return todas;
 }
 
-// Identificar palabras clave de una consulta
+// ==========================================
+// 3. BUSQUEDA TRADICIONAL
+// ==========================================
+
 function obtenerPalabras(texto) {
   const excluidas = new Set([
     "para", "como", "esta", "este", "estos", "estas",
@@ -111,7 +163,6 @@ function obtenerPalabras(texto) {
     .filter(p => p.length >= 3 && !excluidas.has(p));
 }
 
-// Buscar campañas relevantes en toda la colección
 function buscarCampanas(campanas, pregunta) {
   const consulta = normalizar(pregunta);
   const palabras = obtenerPalabras(pregunta);
@@ -127,7 +178,8 @@ function buscarCampanas(campanas, pregunta) {
 
   if (/cancer|tumor|oncolog|mama/.test(consulta)) {
     sinonimos.push(
-      "cancer", "breast", "tumor", "oncolog", "mammogram"
+      "cancer", "breast", "tumor",
+      "oncolog", "mammogram"
     );
   }
 
@@ -143,6 +195,14 @@ function buscarCampanas(campanas, pregunta) {
     );
   }
 
+  if (/participativ|interactiv|experiencia/.test(consulta)) {
+    sinonimos.push(
+      "interactive", "participation", "participacion",
+      "experiencia", "interactivo", "activacion",
+      "engagement"
+    );
+  }
+
   const anios = consulta.match(/\b20\d{2}\b/g) || [];
 
   const festivales = [
@@ -153,8 +213,6 @@ function buscarCampanas(campanas, pregunta) {
     "el ojo",
     "d&ad"
   ].filter(f => consulta.includes(f));
-
-  const solicitaGrandPrix = consulta.includes("grand prix");
 
   const resultados = campanas.map(c => {
     const titulo = normalizar(c.titulo);
@@ -189,20 +247,15 @@ function buscarCampanas(campanas, pregunta) {
       if (festival.includes(f)) score += 50;
     }
 
-    if (solicitaGrandPrix && metales.includes("grand prix")) {
-      score += 300;
-    }
-
-    if (consulta.includes("gold") && metales.includes("gold")) {
-      score += 150;
-    }
-
-    if (consulta.includes("silver") && metales.includes("silver")) {
-      score += 150;
-    }
-
-    if (consulta.includes("bronze") && metales.includes("bronze")) {
-      score += 150;
+    for (const metal of [
+      "grand prix", "gold", "silver", "bronze"
+    ]) {
+      if (
+        consulta.includes(metal) &&
+        metales.includes(metal)
+      ) {
+        score += 150;
+      }
     }
 
     return { ...c, _score: score };
@@ -218,7 +271,101 @@ function buscarCampanas(campanas, pregunta) {
   };
 }
 
-// Preparar casos para la inteligencia artificial
+// ==========================================
+// 4. BUSQUEDA SEMANTICA CON GEMINI
+// ==========================================
+
+async function buscarSemanticas(pregunta) {
+  const geminiKey = process.env.GEMINI_API_KEY;
+
+  if (!geminiKey) {
+    throw new Error("Falta GEMINI_API_KEY");
+  }
+
+  const { url, headers } = configurarSupabase();
+
+  const respuestaEmbedding = await fetchConTimeout(
+    "https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": geminiKey
+      },
+      body: JSON.stringify({
+        model: "models/gemini-embedding-001",
+        content: {
+          parts: [{ text: pregunta }]
+        },
+        taskType: "RETRIEVAL_QUERY",
+        outputDimensionality: 768
+      })
+    },
+    12000
+  );
+
+  const datosEmbedding = await respuestaEmbedding.json();
+
+  if (!respuestaEmbedding.ok) {
+    throw new Error(
+      datosEmbedding.error?.message ||
+      "Gemini no pudo generar el embedding."
+    );
+  }
+
+  const valores = datosEmbedding.embedding?.values;
+
+  if (!Array.isArray(valores) || valores.length !== 768) {
+    throw new Error("Embedding de consulta inválido.");
+  }
+
+  const norma = Math.sqrt(
+    valores.reduce((s, n) => s + n * n, 0)
+  );
+
+  if (!norma) {
+    throw new Error("Vector vacío.");
+  }
+
+  const vector = valores.map(n => n / norma);
+
+  // Consultar la función RPC de PostgreSQL
+  const respuesta = await fetchConTimeout(
+    `${url}/rest/v1/rpc/buscar_campanas_semanticas`,
+    {
+      method: "POST",
+      headers: {
+        ...headers,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        query_embedding: JSON.stringify(vector),
+        cantidad: 20
+      })
+    },
+    12000
+  );
+
+  const resultados = await respuesta.json();
+
+  if (!respuesta.ok) {
+    throw new Error(
+      resultados.message ||
+      `Error RPC ${respuesta.status}`
+    );
+  }
+
+  if (!Array.isArray(resultados)) {
+    throw new Error("Respuesta semántica inválida.");
+  }
+
+  return resultados;
+}
+
+// ==========================================
+// 5. CONSTRUIR CONTEXTO PARA LA IA
+// ==========================================
+
 function construirContexto(campanas) {
   return campanas.map((c, i) => {
     const analisis = String(c.analisis_board || "")
@@ -229,6 +376,7 @@ function construirContexto(campanas) {
 
     return [
       `CASO ${i + 1}`,
+      `ID: ${c.id}`,
       `TÍTULO: ${c.titulo || "Sin título"}`,
       `MARCA: ${c.marca || "No registrada"}`,
       `FESTIVAL: ${c.festival || "No registrado"}`,
@@ -242,7 +390,10 @@ function construirContexto(campanas) {
   }).join("\n\n----------------------\n\n");
 }
 
-// Función principal de Vercel
+// ==========================================
+// 6. FUNCION PRINCIPAL
+// ==========================================
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({
@@ -266,15 +417,52 @@ export default async function handler(req, res) {
 
   if (!geminiKey && !groqKey && !openrouterKey) {
     return res.status(500).json({
-      error: "No hay claves API de inteligencia artificial configuradas."
+      error: "No hay claves API configuradas en Vercel."
     });
   }
 
   try {
+    // ======================================
+    // RECUPERAR BASE COMPLETA
+    // ======================================
+
     const campanas = await obtenerCampanas();
 
+    console.log("FESTIVAL AI - DIAGNOSTICO", {
+      totalCampanas: campanas.length,
+      proyecto: new URL(process.env.SUPABASE_URL).hostname
+    });
+
+    // ======================================
+    // DETECTAR PREGUNTAS DE CONTEO
+    // ======================================
+
+    const preguntaNorm = normalizar(mensaje);
+
+    if (
+      /cuantas campanas|cuantos registros|total de campanas/.test(
+        preguntaNorm
+      ) &&
+      !/marca|festival|agencia|categoria|premio|ano|año/.test(
+        preguntaNorm
+      )
+    ) {
+      return res.status(200).json({
+        respuesta:
+          `Actualmente tengo **${campanas.length.toLocaleString("es-PE")} campañas publicitarias** registradas en Supabase.`,
+        registrosTotales: campanas.length,
+        coincidencias: campanas.length,
+        casosAnalizados: 0,
+        busquedaSemantica: "no necesaria"
+      });
+    }
+
+    // ======================================
+    // HISTORIAL
+    // ======================================
+
     const historialSeguro = Array.isArray(historial)
-      ? historial.slice(-4).filter(m =>
+      ? historial.slice(-6).filter(m =>
           ["user", "assistant"].includes(m.role) &&
           typeof m.content === "string"
         )
@@ -286,203 +474,163 @@ export default async function handler(req, res) {
       .map(m => m.content)
       .join(" ");
 
+    const consultaCompleta =
+      `${consultasPrevias} ${mensaje}`.trim();
 
-const busqueda = buscarCampanas(
-  campanas,
-  `${consultasPrevias} ${mensaje}`
-);
+    // ======================================
+    // BUSQUEDA TRADICIONAL
+    // ======================================
 
-// Búsqueda semántica usando Gemini y pgvector
-let casosSemanticos = [];
-
-try {
-  const geminiKeySemantica = process.env.GEMINI_API_KEY;
-  const supabaseUrl = process.env.SUPABASE_URL;
-  const supabaseKey =
-    process.env.SUPABASE_SECRET_KEY ||
-    process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-  if (!geminiKeySemantica || !supabaseUrl || !supabaseKey) {
-    throw new Error("Faltan claves para búsqueda semántica");
-  }
-
-  // Convertir la pregunta en un vector de 768 dimensiones
-  const respuestaEmbedding = await fetchConTimeout(
-    "https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent",
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-goog-api-key": geminiKeySemantica
-      },
-      body: JSON.stringify({
-        model: "models/gemini-embedding-001",
-        content: {
-          parts: [{ text: mensaje }]
-        },
-        taskType: "RETRIEVAL_QUERY",
-        outputDimensionality: 768
-      })
-    },
-    12000
-  );
-
-  const datosEmbedding = await respuestaEmbedding.json();
-
-  if (!respuestaEmbedding.ok) {
-    throw new Error(
-      datosEmbedding.error?.message || "Error de Gemini Embedding"
+    const busqueda = buscarCampanas(
+      campanas,
+      consultaCompleta
     );
-  }
 
-  const valores = datosEmbedding.embedding?.values;
+    // ======================================
+    // BUSQUEDA SEMANTICA
+    // ======================================
 
-  if (!Array.isArray(valores) || valores.length !== 768) {
-    throw new Error("Embedding de consulta inválido");
-  }
+    let casosSemanticos = [];
+    let estadoSemantico = "pendiente";
 
-  // Normalizar el vector
-  const norma = Math.sqrt(
-    valores.reduce((s, n) => s + n * n, 0)
-  );
+    try {
+      casosSemanticos = await buscarSemanticas(
+        consultaCompleta
+      );
 
-  if (!norma) throw new Error("Vector vacío");
+      estadoSemantico = "correcta";
 
-  const vector = valores.map(n => n / norma);
+      console.log(
+        "FESTIVAL AI - Resultados semánticos:",
+        casosSemanticos.length
+      );
 
-  // Buscar campañas similares en Supabase
-  const respuestaBusqueda = await fetchConTimeout(
-    `${supabaseUrl.replace(/\/$/, "")}/rest/v1/rpc/buscar_campanas_semanticas`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        apikey: supabaseKey,
-        ...(
-          supabaseKey.startsWith("sb_secret_")
-            ? {}
-            : { Authorization: `Bearer ${supabaseKey}` }
-        )
-      },
-      body: JSON.stringify({
-        query_embedding: vector,
-        cantidad: 20
-      })
-    },
-    12000
-  );
+    } catch (error) {
+      estadoSemantico = "fallo";
 
-  const resultados = await respuestaBusqueda.json();
+      console.error(
+        "FESTIVAL AI - Error semántico:",
+        error.message
+      );
+    }
 
-  if (!respuestaBusqueda.ok) {
-    throw new Error(
-      resultados.message || "Error en búsqueda vectorial"
+    // ======================================
+    // COMBINAR RESULTADOS
+    // ======================================
+
+    const porId = new Map(
+      campanas.map(c => [String(c.id), c])
     );
-  }
 
-  if (!Array.isArray(resultados)) {
-    throw new Error("Resultados semánticos inválidos");
-  }
+    const seleccionadas = [];
+    const idsIncluidos = new Set();
 
-  // Recuperar los registros completos de las campañas
-  const porId = new Map(
-    campanas.map(c => [String(c.id), c])
-  );
+    const resultadosCombinados = [
+      ...casosSemanticos.map(r =>
+        porId.get(String(r.id)) || r
+      ),
+      ...busqueda.seleccionadas
+    ];
 
-  casosSemanticos = resultados
-    .map(r => porId.get(String(r.id)) || r)
-    .filter(Boolean);
+    for (const campana of resultadosCombinados) {
+      if (!campana) continue;
 
-} catch (error) {
-  console.warn("Búsqueda semántica:", error.message);
-}
+      const id = String(campana.id);
 
-// Combinar búsqueda semántica y búsqueda tradicional
-const seleccionadas = [];
-const idsIncluidos = new Set();
+      if (idsIncluidos.has(id)) continue;
 
-for (const campana of [
-  ...casosSemanticos,
-  ...busqueda.seleccionadas
-]) {
-  const id = String(campana.id);
+      idsIncluidos.add(id);
+      seleccionadas.push(campana);
 
-  if (!idsIncluidos.has(id)) {
-    idsIncluidos.add(id);
-    seleccionadas.push(campana);
-  }
+      if (seleccionadas.length >= 20) break;
+    }
 
-  if (seleccionadas.length >= 20) break;
-}
+    const contexto = construirContexto(seleccionadas);
 
-busqueda.seleccionadas = seleccionadas;
+    console.log("FESTIVAL AI - RECUPERACION", {
+      registrosTotales: campanas.length,
+      coincidenciasTextuales: busqueda.totalCoincidencias,
+      resultadosSemanticos: casosSemanticos.length,
+      casosSeleccionados: seleccionadas.length,
+      estadoSemantico
+    });
 
-const contexto = construirContexto(seleccionadas);
-
+    // ======================================
+    // INSTRUCCIONES DEL JURADO
+    // ======================================
 
     const promptSistema = `
-Eres FESTIVAL AI, un investigador y jurado especializado
-en creatividad publicitaria y festivales internacionales.
+Eres FESTIVAL AI, un investigador y jurado
+especializado en creatividad publicitaria.
 
-Tu objetivo es analizar campañas publicitarias reales
-utilizando exclusivamente los registros recuperados
-de la base de datos del usuario.
+Tu trabajo es analizar campañas reales utilizando
+la base de datos de festivales publicitarios.
 
-BASE DE DATOS:
-Total de campañas registradas: ${campanas.length}
-Coincidencias textuales encontradas: ${busqueda.totalCoincidencias}
-Campañas entregadas para análisis: ${busqueda.seleccionadas.length}
+INFORMACION DE LA BASE:
 
-CAMPAÑAS RECUPERADAS:
-${contexto || "No se encontraron coincidencias textuales."}
+Total de campañas: ${campanas.length}
+Coincidencias textuales: ${busqueda.totalCoincidencias}
+Resultados semánticos: ${casosSemanticos.length}
+Estado búsqueda semántica: ${estadoSemantico}
+Casos seleccionados: ${seleccionadas.length}
+
+IMPORTANTE:
+Las coincidencias textuales no representan
+necesariamente campañas relevantes.
+
+La búsqueda semántica solo cubre campañas
+que ya tengan embeddings guardados.
+
+CASOS RECUPERADOS:
+
+${contexto || "No se recuperaron casos para esta consulta."}
 
 REGLAS:
 
-1. No inventes campañas, premios, marcas ni enlaces.
+1. Utiliza exclusivamente las campañas proporcionadas
+como ejemplos reales.
 
-2. Diferencia claramente los premios Gold, Silver,
-Bronze, Grand Prix, Shortlist y NO GANO.
+2. No inventes títulos, premios, festivales,
+agencias ni enlaces.
 
-3. Una misma campaña puede ganar en una categoría
-y no ganar en otras. No confundas esos resultados.
+3. Analiza problema, insight, concepto,
+ejecución y originalidad.
 
-4. Analiza las ideas desde la perspectiva creativa:
-problema, insight, concepto, ejecución y originalidad.
+4. Identifica semejanzas creativas entre campañas.
 
-5. Cuando compares campañas, identifica semejanzas
-y diferencias concretas.
+5. Diferencia Grand Prix, Gold, Silver,
+Bronze, Shortlist y NO GANO.
 
-6. Si el usuario solicita enlaces, utiliza los enlaces
-que aparecen en los registros.
+6. Una campaña puede ganar en una categoría
+y no ganar en otras.
 
-7. Las campañas recuperadas son solo una selección.
-No afirmes que algo no existe en toda la base
-si no aparece en esta selección.
+7. Si se solicita un enlace, utiliza
+el enlace real del registro.
 
-8. Si la pregunta requiere examinar todas las campañas,
-advierte que el análisis es parcial y no exhaustivo.
+8. No afirmes que una campaña no existe
+solo porque no fue recuperada.
 
-9. Si falta información en el análisis de un board,
-indícalo claramente.
+9. Si no hay casos suficientes, indica que
+la recuperación fue limitada.
 
-10. No confundas una coincidencia de palabras con una
-similitud creativa demostrada.
+10. No presentes los resultados semánticos
+como una búsqueda exhaustiva de toda la base.
 
-11. Responde en español, de forma clara, precisa
-y con información verificable.
+11. Prioriza explicaciones claras, concretas
+y útiles para desarrollar ideas publicitarias.
+
+12. Responde en español.
 `;
 
     const mensajes = [
-      {
-        role: "system",
-        content: promptSistema
-      },
+      { role: "system", content: promptSistema },
       ...historialSeguro,
-      {
-        role: "user",
-        content: mensaje
-      }
+      { role: "user", content: mensaje }
     ];
+
+    // ======================================
+    // GROQ Y OPENROUTER
+    // ======================================
 
     async function llamarOpenAICompatible(
       endpoint,
@@ -490,7 +638,9 @@ y con información verificable.
       modelos,
       proveedor
     ) {
-      if (!key) throw new Error(`Sin clave de ${proveedor}`);
+      if (!key) {
+        throw new Error(`Sin clave de ${proveedor}`);
+      }
 
       for (const modelo of modelos) {
         try {
@@ -503,7 +653,8 @@ y con información verificable.
                 Authorization: `Bearer ${key}`,
                 ...(proveedor === "OpenRouter"
                   ? {
-                      "HTTP-Referer": "https://festival-ai.vercel.app",
+                      "HTTP-Referer":
+                        "https://festival-ai.vercel.app",
                       "X-Title": "Festival AI"
                     }
                   : {})
@@ -515,32 +666,50 @@ y con información verificable.
                 max_tokens: 1600
               })
             },
-            10000
+            12000
           );
 
           const data = await respuesta.json();
 
           if (!respuesta.ok) {
-            console.warn(proveedor, modelo, respuesta.status);
+            console.warn(
+              proveedor,
+              modelo,
+              respuesta.status,
+              data.error?.message || ""
+            );
             continue;
           }
 
-          const texto = data.choices?.[0]?.message?.content;
+          const texto =
+            data.choices?.[0]?.message?.content;
 
           if (typeof texto === "string" && texto.trim()) {
             return texto;
           }
 
         } catch (error) {
-          console.warn(proveedor, modelo, error.message);
+          console.warn(
+            proveedor,
+            modelo,
+            error.message
+          );
         }
       }
 
-      throw new Error(`No hubo respuesta válida de ${proveedor}`);
+      throw new Error(
+        `No hubo respuesta válida de ${proveedor}`
+      );
     }
 
+    // ======================================
+    // GEMINI
+    // ======================================
+
     async function llamarGemini() {
-      if (!geminiKey) throw new Error("Sin clave Gemini");
+      if (!geminiKey) {
+        throw new Error("Sin clave Gemini");
+      }
 
       const modelos = [
         "gemini-2.5-flash",
@@ -561,7 +730,13 @@ y con información verificable.
                 contents: [{
                   role: "user",
                   parts: [{
-                    text: `${promptSistema}\n\nCONSULTA:\n${mensaje}`
+                    text:
+                      `${promptSistema}\n\n` +
+                      `HISTORIAL:\n` +
+                      historialSeguro.map(m =>
+                        `${m.role}: ${m.content}`
+                      ).join("\n") +
+                      `\n\nCONSULTA ACTUAL:\n${mensaje}`
                   }]
                 }],
                 generationConfig: {
@@ -576,7 +751,12 @@ y con información verificable.
           const data = await respuesta.json();
 
           if (!respuesta.ok) {
-            console.warn("Gemini", modelo, respuesta.status);
+            console.warn(
+              "Gemini",
+              modelo,
+              respuesta.status,
+              data.error?.message || ""
+            );
             continue;
           }
 
@@ -587,7 +767,11 @@ y con información verificable.
           if (texto?.trim()) return texto;
 
         } catch (error) {
-          console.warn("Gemini", modelo, error.message);
+          console.warn(
+            "Gemini",
+            modelo,
+            error.message
+          );
         }
       }
 
@@ -611,12 +795,16 @@ y con información verificable.
         "https://openrouter.ai/api/v1/chat/completions",
         openrouterKey,
         [
-          "openai/gpt-oss-20b:free",
+          "openrouter/free",
           "google/gemma-3-27b-it:free"
         ],
         "OpenRouter"
       );
     }
+
+    // ======================================
+    // CASCADA AUTOMATICA DE MODELOS
+    // ======================================
 
     const proveedores = {
       gemini: llamarGemini,
@@ -629,6 +817,7 @@ y con información verificable.
       : [estrategia];
 
     let respuestaTexto = null;
+    let proveedorUtilizado = null;
     const errores = [];
 
     for (const proveedor of orden) {
@@ -636,30 +825,49 @@ y con información verificable.
 
       try {
         respuestaTexto = await proveedores[proveedor]();
-        if (respuestaTexto) break;
+
+        if (respuestaTexto) {
+          proveedorUtilizado = proveedor;
+          break;
+        }
+
       } catch (error) {
-        errores.push(`${proveedor}: ${error.message}`);
+        errores.push(
+          `${proveedor}: ${error.message}`
+        );
       }
     }
 
     if (!respuestaTexto) {
       throw new Error(
-        "Ningún proveedor respondió. " + errores.join("; ")
+        "Ningún proveedor respondió. " +
+        errores.join("; ")
       );
     }
+
+    // ======================================
+    // RESPUESTA FINAL
+    // ======================================
 
     return res.status(200).json({
       respuesta: respuestaTexto,
       registrosTotales: campanas.length,
       coincidencias: busqueda.totalCoincidencias,
-      casosAnalizados: busqueda.seleccionadas.length
+      casosSemanticos: casosSemanticos.length,
+      casosAnalizados: seleccionadas.length,
+      busquedaSemantica: estadoSemantico,
+      proveedor: proveedorUtilizado
     });
 
   } catch (error) {
-    console.error("Festival AI:", error);
+    console.error(
+      "FESTIVAL AI - ERROR GENERAL:",
+      error
+    );
 
     return res.status(500).json({
-      error: error.message || "Error interno del servidor."
+      error: error.message ||
+        "Error interno del servidor."
     });
   }
 }
