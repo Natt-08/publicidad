@@ -273,6 +273,47 @@ async function obtenerCampanasPorIds(ids) {
   return datos;
 }
 
+// Premios Grand Prix: consulta estructurada, independiente del ranking semántico.
+async function obtenerGrandPrix() {
+  const { url, headers } = configurarSupabase();
+  const respuesta = await fetchConTimeout(
+    `${url}/rest/v1/rpc/festival_buscar_grand_prix`,
+    { method: "POST", headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify({ p_limite: 100 }) }, 11000
+  );
+  if (!respuesta.ok) throw new Error(`RPC Grand Prix HTTP ${respuesta.status}`);
+  const datos = await respuesta.json();
+  if (!Array.isArray(datos)) throw new Error("Respuesta Grand Prix inválida");
+  return datos;
+}
+
+function pideGrandPrix(mensaje, historial) {
+  const actual = normalizar(mensaje);
+  if (/grand\s*prix/.test(actual)) return true;
+  const seguimiento = /^(no hay mas|hay mas|menciona mas|dame mas|cuales mas|y los otros)/.test(actual);
+  return seguimiento && Array.isArray(historial) && historial.slice(-4).some(m =>
+    m.role === "user" && /grand\s*prix/.test(normalizar(m.content))
+  );
+}
+
+function respuestaGrandPrix(filas, mensaje) {
+  if (!filas.length) return "No hay registros con Grand Prix en el campo de premios de la base consultada.";
+  const total = Number(filas[0].total_campanas);
+  const premios = Number(filas[0].total_premios);
+  const festivales = Number(filas[0].total_festivales);
+  const normal = normalizar(mensaje);
+  const pideConteo = /cuant|numero|total/.test(normal) && !/menciona|lista|cuales|dame/.test(normal);
+  const cabecera = `En Supabase hay **${total} registros de campañas con Grand Prix**, **${premios} premios Grand Prix** y **${festivales} festivales**. Un mismo registro puede contener varios Grand Prix y una misma campaña puede aparecer en festivales distintos.`;
+  if (pideConteo) return cabecera;
+  const matchNumero = normal.match(/\b(\d{1,2})\b/);
+  const solicitados = matchNumero ? Number(matchNumero[1]) : 15;
+  const limite = Math.min(Math.max(solicitados,1), Math.min(filas.length, 56));
+  const salida = filas.slice(0,limite).map((c, i) =>
+    `${i+1}. **${c.titulo}** — ${c.marca} (${c.festival}, ${c.anio}). Grand Prix: ${c.categorias_grand_prix}.`
+  );
+  return `${cabecera}\n\n**Registros documentados (primeros ${limite}, ordenados alfabéticamente):**\n\n${salida.join("\n")}\n\nEsta lista muestra registros de Supabase, no necesariamente campañas creativas únicas.`;
+}
+
 // Combina listas de IDs. La consulta de detalles ocurre DESPUÉS del ranking.
 function fusionarIds(texto, semanticas, limite = 8) {
   const puntos = new Map();
@@ -1065,6 +1106,22 @@ export default async function handler(req, res) {
         registrosTotales: totalCampanas,
         busquedaSemantica: "no necesaria",
         casosAnalizados: 0
+      });
+    }
+
+    // Consultas explícitas de Grand Prix: datos estructurados, no respuestas inferidas.
+    // Para comparación creativa se conserva el análisis híbrido posterior.
+    if (pideGrandPrix(mensaje, historial) &&
+        !/compar|diferenc|insight|por que|analiz|versus|vs\b/.test(pregunta)) {
+      const ganadores = await obtenerGrandPrix();
+      return res.status(200).json({
+        respuesta: respuestaGrandPrix(ganadores, mensaje),
+        registrosTotales: totalCampanas,
+        casosAnalizados: ganadores.length,
+        busquedaSemantica: "no necesaria",
+        motorTexto: "premios-sql",
+        proveedor: "supabase",
+        modelo: "consulta estructurada"
       });
     }
 
