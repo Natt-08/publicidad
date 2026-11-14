@@ -213,6 +213,80 @@ async function descargarCampanas() {
   return acumuladas;
 }
 
+// =============================
+// SUPABASE: BÚSQUEDA SIN DESCARGA MASIVA
+// =============================
+const COLUMNAS_CAMPANA = [
+  "id", "titulo", "marca", "festival", "anio", "categorias",
+  "metales", "agencia", "analisis_board", "board_image"
+].join(",");
+
+async function obtenerTotalCampanas() {
+  const { url, headers } = configurarSupabase();
+  const respuesta = await fetchConTimeout(
+    `${url}/rest/v1/campanas?select=id&limit=1`,
+    { method: "HEAD", headers: { ...headers, Prefer: "count=exact" } },
+    7000
+  );
+  if (!respuesta.ok) throw new Error(`Conteo Supabase ${respuesta.status}`);
+  const rango = respuesta.headers.get("content-range") || "";
+  const total = Number(rango.split("/").pop());
+  if (!Number.isSafeInteger(total) || total < 0) throw new Error("Conteo inválido de Supabase");
+  return total;
+}
+
+async function buscarTextoEnSupabase(pregunta) {
+  const { url, headers } = configurarSupabase();
+  const respuesta = await fetchConTimeout(
+    `${url}/rest/v1/rpc/festival_buscar_texto`,
+    {
+      method: "POST",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify({ p_consulta: pregunta, p_limite: 40 })
+    },
+    11000
+  );
+  if (!respuesta.ok) {
+    const detalle = (await respuesta.text()).slice(0, 200);
+    throw new Error(`RPC textual ${respuesta.status}: ${detalle}`);
+  }
+  const filas = await respuesta.json();
+  if (!Array.isArray(filas)) throw new Error("RPC textual devolvió un formato inválido");
+  return {
+    total: Number(filas[0]?.total_coincidencias || 0),
+    registros: filas.map(f => ({ id: String(f.id), _puntajeTexto: Number(f.puntaje) || 0 }))
+  };
+}
+
+async function obtenerCampanasPorIds(ids) {
+  const seguros = [...new Set(ids.map(String))].filter(id => /^[0-9a-fA-F-]{1,64}$/.test(id)).slice(0, 12);
+  if (!seguros.length) return [];
+  const { url, headers } = configurarSupabase();
+  const params = new URLSearchParams({ select: COLUMNAS_CAMPANA, id: `in.(${seguros.join(",")})` });
+  const respuesta = await fetchConTimeout(
+    `${url}/rest/v1/campanas?${params}`,
+    { headers }, 10000
+  );
+  if (!respuesta.ok) throw new Error(`Detalles de campañas ${respuesta.status}`);
+  const datos = await respuesta.json();
+  if (!Array.isArray(datos)) throw new Error("Detalles de campañas inválidos");
+  return datos;
+}
+
+// Combina listas de IDs. La consulta de detalles ocurre DESPUÉS del ranking.
+function fusionarIds(texto, semanticas, limite = 8) {
+  const puntos = new Map();
+  for (const [lista, peso] of [[texto.registros, 2.8], [semanticas, 1]]) {
+    lista.forEach((r, i) => {
+      if (r?.id == null) return;
+      const id = String(r.id);
+      puntos.set(id, (puntos.get(id) || 0) + peso / (60 + i + 1));
+    });
+  }
+  return [...puntos.entries()].sort((a, b) => b[1] - a[1])
+    .slice(0, limite).map(([id]) => id);
+}
+
 // ==========================================
 // 3. BUSQUEDA TRADICIONAL
 // ==========================================
@@ -974,31 +1048,21 @@ export default async function handler(req, res) {
     // RECUPERAR CAMPAÑAS
     // ======================================
 
-    const campanas = await obtenerCampanas();
-
-    console.log(
-      "Festival AI - Total:",
-      campanas.length
-    );
-
+    // Total por HEAD; no carga los expedientes de toda la tabla.
+    // Si la función textual no está instalada todavía, se usa el método anterior.
+    let totalCampanas = null;
+    try { totalCampanas = await obtenerTotalCampanas(); }
+    catch (error) { console.warn("No se pudo contar campañas:", error.message); }
     const pregunta = normalizar(mensaje);
 
-    // ======================================
-    // CONSULTAS DE CONTEO
-    // ======================================
-
     if (
-      /cuantas campanas|cuantos registros|total de campanas/.test(
-        pregunta
-      ) &&
-      !/marca|festival|agencia|categoria|premio|ano/.test(
-        pregunta
-      )
+      /cuantas campanas|cuantos registros|total de campanas/.test(pregunta) &&
+      !/marca|festival|agencia|categoria|premio|ano/.test(pregunta)
     ) {
+      if (totalCampanas === null) throw new Error("Conteo no disponible");
       return res.status(200).json({
-        respuesta:
-          `Actualmente tengo **${campanas.length.toLocaleString("es-PE")} campañas publicitarias** registradas en Supabase.`,
-        registrosTotales: campanas.length,
+        respuesta: `Actualmente tengo **${totalCampanas.toLocaleString("es-PE")} campañas publicitarias** registradas en Supabase.`,
+        registrosTotales: totalCampanas,
         busquedaSemantica: "no necesaria",
         casosAnalizados: 0
       });
@@ -1047,54 +1111,54 @@ const consultaBusqueda =
     ? `${ultimoMensajeUsuario} ${mensaje}`
     : mensaje;
 
-const busquedaTexto = buscarTexto(
-  campanas,
-  consultaBusqueda
-);
+// Búsqueda textual: ranking en SQL. Respaldo temporal si falta instalar el RPC.
+let busquedaTexto;
+let campanasRespaldo = null;
+let motorTexto = "supabase";
+try {
+  busquedaTexto = await buscarTextoEnSupabase(consultaBusqueda);
+} catch (error) {
+  console.warn("Búsqueda SQL no disponible, activando respaldo:", error.message);
+  motorTexto = "respaldo";
+  campanasRespaldo = await obtenerCampanas();
+  totalCampanas = campanasRespaldo.length;
+  busquedaTexto = buscarTexto(campanasRespaldo, consultaBusqueda);
+}
 
+let semanticas = [];
+let estadoSemantico = "correcta";
+try {
+  semanticas = await buscarSemanticas(consultaBusqueda);
+} catch (error) {
+  estadoSemantico = "fallo";
+  console.warn("Festival AI - Búsqueda semántica:", error.message);
+}
 
-    let semanticas = [];
-    let estadoSemantico = "correcta";
-
-    try {
-      semanticas = await buscarSemanticas(
-        consultaBusqueda
-      );
-
-    } catch (error) {
-      estadoSemantico = "fallo";
-
-      console.warn(
-        "Festival AI - Búsqueda semántica:",
-        error.message
-      );
-    }
-
-    // ======================================
-    // COMBINAR RESULTADOS
-    // ======================================
-
-    const porId = new Map(
-      campanas.map(c => [
-        String(c.id),
-        c
-      ])
-    );
-
-    const seleccionadas = combinarResultados(
-      campanas, semanticas, busquedaTexto, consultaBusqueda, 8
-    );
+let seleccionadas;
+if (campanasRespaldo) {
+  seleccionadas = combinarResultados(
+    campanasRespaldo, semanticas, busquedaTexto, consultaBusqueda, 8
+  );
+} else {
+  const mejoresIds = fusionarIds(busquedaTexto, semanticas, 8);
+  seleccionadas = await obtenerCampanasPorIds(mejoresIds);
+  const ordenIds = new Map(mejoresIds.map((id, i) => [id, i]));
+  seleccionadas.sort((a, b) =>
+    (ordenIds.get(String(a.id)) ?? 999) - (ordenIds.get(String(b.id)) ?? 999)
+  );
+}
 
     console.log(
       "Festival AI - Recuperación:",
       {
-        registrosTotales: campanas.length,
+        registrosTotales: totalCampanas,
         coincidenciasTextuales:
           busquedaTexto.total,
         resultadosSemanticos:
           semanticas.length,
         casosSeleccionados:
           seleccionadas.length,
+        motorTexto,
         estadoSemantico
       }
     );
@@ -1111,7 +1175,7 @@ Tu objetivo es analizar campañas publicitarias
 reales usando exclusivamente registros de Supabase.
 
 BASE DE DATOS:
-Total de campañas: ${campanas.length}
+Total de campañas: ${totalCampanas ?? "No disponible"}
 Coincidencias textuales: ${busquedaTexto.total}
 Resultados semánticos: ${semanticas.length}
  Estado de búsqueda semántica: ${estadoSemantico}
@@ -1290,7 +1354,7 @@ ${construirContexto(seleccionadas, consultaBusqueda) || "No se recuperaron casos
       respuesta: resultado.respuesta,
 
       registrosTotales:
-        campanas.length,
+        totalCampanas,
 
       coincidencias:
         busquedaTexto.total,
@@ -1305,6 +1369,7 @@ ${construirContexto(seleccionadas, consultaBusqueda) || "No se recuperaron casos
         estadoSemantico,
 
       consultaBusqueda,
+      motorTexto,
       proveedor:
         resultado.proveedor,
 
