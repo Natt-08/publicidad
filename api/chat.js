@@ -953,17 +953,34 @@ export default async function handler(req, res) {
     // BUSQUEDA HIBRIDA
     // ======================================
 
-    const busquedaTexto = buscarTexto(
-      campanas,
-      mensaje
-    );
+
+const ultimoMensajeUsuario = [...historialSeguro]
+  .reverse()
+  .find(m => m.role === "user")
+  ?.content || "";
+
+const esSeguimientoCorto =
+  mensaje.trim().length < 80 &&
+  /^(si existe|sí existe|existe|dame su link|pasame su link|pásame su link|explicame mejor|explícame mejor|hablame de esa|háblame de esa)/i
+    .test(normalizar(mensaje));
+
+const consultaBusqueda =
+  esSeguimientoCorto && ultimoMensajeUsuario
+    ? `${ultimoMensajeUsuario} ${mensaje}`
+    : mensaje;
+
+const busquedaTexto = buscarTexto(
+  campanas,
+  consultaBusqueda
+);
+
 
     let semanticas = [];
     let estadoSemantico = "correcta";
 
     try {
       semanticas = await buscarSemanticas(
-        mensaje
+        consultaBusqueda
       );
 
     } catch (error) {
