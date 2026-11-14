@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Festival AI — Jury Room & Benchmark</title>
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
   <style>
     :root {
       --gold-50:  #FFFCEB;
@@ -110,6 +111,20 @@
     .btn-send { width: 36px; height: 36px; border-radius: 8px; background: var(--gold-500); color: #111217; border: none; display: flex; align-items: center; justify-content: center; cursor: pointer; font-weight: bold; }
     .btn-send:disabled { opacity: 0.5; cursor: not-allowed; }
     .disclaimer { font-size: 11.5px; color: var(--text-dim); margin-top: 8px; }
+    .search-status { font-size: 11px; color: var(--text-muted); margin-top: 8px; border-left: 2px solid var(--gold-600); padding-left: 8px; }
+    .search-status.warning { border-left-color: #eab308; }
+    .msg-body { overflow-wrap: anywhere; }
+    .msg-body pre { overflow-x: auto; background: #111218; padding: 12px; border-radius: 8px; }
+    .msg-body img { max-width: 100%; height: auto; }
+    @media (max-width: 700px) {
+      aside { position: absolute; left: 0; top: 0; bottom: 0; box-shadow: 8px 0 20px #0005; }
+      aside.collapsed { margin-left: -270px; }
+      .cards-grid { grid-template-columns: 1fr; }
+      .msg-body { max-width: 92%; }
+      .top-bar { padding: 0 12px; }
+      #chat-thread { padding: 15px 12px 110px; }
+      .input-container { padding: 0 12px 16px; }
+    }
 
     .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.75); display: none; justify-content: center; align-items: center; z-index: 100; }
     .modal-overlay.active { display: flex; }
@@ -176,14 +191,18 @@
 
   <script>
     let currentChatId = null;
-    let chatHistory = []; 
+    let chatHistory = [];
+    const MAX_SESIONES = 5;
 
     function getSavedChats() {
-      return JSON.parse(localStorage.getItem('festival_sessions')) || [];
+      try {
+        const datos = JSON.parse(localStorage.getItem('festival_sessions') || '[]');
+        return Array.isArray(datos) ? datos : [];
+      } catch { return []; }
     }
 
     function saveChatsToLocal(chats) {
-      if (chats.length > 5) chats = chats.slice(chats.length - 5);
+      if (chats.length > MAX_SESIONES) chats = chats.slice(chats.length - MAX_SESIONES);
       localStorage.setItem('festival_sessions', JSON.stringify(chats));
       renderSidebar(chats);
     }
@@ -269,7 +288,27 @@
         if (msg.role === 'user') {
           row.innerHTML = `<div class="msg-avatar">TÚ</div><div class="msg-body">${escapeHtml(msg.content)}</div>`;
         } else {
-          row.innerHTML = `<div class="msg-avatar">★</div><div class="msg-body">${marked.parse(msg.content)}</div>`;
+          row.innerHTML = `<div class="msg-avatar">★</div><div class="msg-body"></div>`;
+          const cuerpo = row.querySelector('.msg-body');
+          const html = window.marked ? marked.parse(String(msg.content || '')) : escapeHtml(msg.content);
+          // Sin sanitizador, mostrar texto plano: nunca insertar HTML no confiable.
+          cuerpo.innerHTML = window.DOMPurify
+            ? DOMPurify.sanitize(html, { USE_PROFILES: { html: true } })
+            : escapeHtml(msg.content);
+          cuerpo.querySelectorAll('a').forEach(a => {
+            if (!/^https?:$/i.test(new URL(a.href, location.href).protocol)) {
+              a.removeAttribute('href');
+            } else {
+              a.target = '_blank'; a.rel = 'noopener noreferrer';
+            }
+          });
+          if (msg.meta) {
+            const estado = document.createElement('div');
+            estado.className = 'search-status' + (msg.meta.busquedaSemantica === 'fallo' ? ' warning' : '');
+            const modo = msg.meta.busquedaSemantica === 'fallo' ? 'Búsqueda semántica no disponible' : 'Búsqueda semántica activa';
+            estado.textContent = `${modo} · ${msg.meta.casosAnalizados ?? 0} casos consultados · ${msg.meta.proveedor || 'IA'}`;
+            cuerpo.appendChild(estado);
+          }
         }
         thread.appendChild(row);
       });
@@ -306,11 +345,14 @@
     chatForm.onsubmit = async (e) => {
       e.preventDefault();
       const txt = queryInput.value.trim();
-      if (!txt) return;
+      if (!txt || btnSend.disabled) return;
+      if (txt.length > 3000) { alert('La consulta admite como máximo 3000 caracteres.'); return; }
+      let chatIdEnviado = currentChatId;
 
       const isFirstMessage = !currentChatId;
       if (isFirstMessage) {
         currentChatId = Date.now().toString();
+        chatIdEnviado = currentChatId;
         const title = txt.length > 22 ? txt.substring(0, 22) + '...' : txt;
         const chats = getSavedChats();
         chats.push({ id: currentChatId, title: title, messages: [] });
@@ -321,6 +363,7 @@
       renderMessages();
       queryInput.value = '';
       btnSend.disabled = true;
+      queryInput.disabled = true;
 
       const botRow = document.createElement('div');
       botRow.className = 'message-row bot';
@@ -347,7 +390,14 @@
 
         if (!res.ok) throw new Error(data.error || 'Fallo en la consulta.');
 
-        chatHistory.push({ role: 'assistant', content: data.respuesta });
+        // Evitar mezclar una respuesta atrasada con otra sesión.
+        if (currentChatId !== chatIdEnviado) {
+          btnSend.disabled = false;
+          queryInput.disabled = false;
+          return;
+        }
+        chatHistory.push({ role: 'assistant', content: data.respuesta,
+          meta: { busquedaSemantica: data.busquedaSemantica, casosAnalizados: data.casosAnalizados, proveedor: data.proveedor } });
         renderMessages();
 
         const chats = getSavedChats();
@@ -357,9 +407,12 @@
           saveChatsToLocal(chats);
         }
       } catch (err) {
-        botRow.querySelector('.msg-body').innerHTML = `<span style="color: #ef4444;">Error: ${err.message}</span>`;
+        const errorEl = botRow.querySelector('.msg-body');
+        if (errorEl) { errorEl.style.color = '#ef4444'; errorEl.textContent = `Error: ${err.message}`; }
       }
       btnSend.disabled = false;
+      queryInput.disabled = false;
+      queryInput.focus();
     };
 
     function escapeHtml(str) {
