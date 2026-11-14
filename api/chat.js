@@ -989,13 +989,53 @@ export default async function handler(req, res) {
     const seleccionadas = [];
     const vistos = new Set();
 
-    const resultados = [
-      ...semanticas.map(r =>
-        porId.get(String(r.id)) || r
-      ),
-      ...busquedaTexto.registros
-    ];
 
+const consultaNormalizada = normalizar(
+  consultaBusqueda
+);
+
+// Detectar campañas mencionadas por su nombre.
+// Se revisan TODOS los registros de Supabase.
+const coincidenciasDirectas = campanas.filter(c => {
+  const titulo = normalizar(c.titulo);
+  const marca = normalizar(c.marca);
+
+  if (titulo.length < 5) return false;
+
+  const coincideTitulo =
+    consultaNormalizada.includes(titulo);
+
+  const coincideMarca =
+    marca.length >= 3 &&
+    consultaNormalizada.includes(marca);
+
+  return coincideTitulo && coincideMarca;
+});
+
+// Respaldo cuando se menciona el nombre,
+// pero no se escribe la marca.
+const coincidenciasPorTitulo = campanas.filter(c => {
+  const titulo = normalizar(c.titulo);
+
+  return (
+    titulo.length >= 5 &&
+    consultaNormalizada.includes(titulo)
+  );
+});
+
+// Orden de prioridad:
+// 1. Nombre y marca exactos
+// 2. Nombre exacto
+// 3. Similitud semántica
+// 4. Coincidencias tradicionales
+const resultados = [
+  ...coincidenciasDirectas,
+  ...coincidenciasPorTitulo,
+  ...semanticas.map(r =>
+    porId.get(String(r.id)) || r
+  ),
+  ...busquedaTexto.registros
+];
     for (const campana of resultados) {
       if (!campana) continue;
 
