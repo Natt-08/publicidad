@@ -287,6 +287,57 @@ async function obtenerGrandPrix() {
   return datos;
 }
 
+// Análisis transversal de la base: cifras completas y muestra comparativa equilibrada.
+async function rpcComparativas(nombre, parametros) {
+  const { url, headers } = configurarSupabase();
+  const respuesta = await fetchConTimeout(
+    `${url}/rest/v1/rpc/${nombre}`,
+    { method: "POST", headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify(parametros) }, 12000
+  );
+  if (!respuesta.ok) throw new Error(`RPC ${nombre} HTTP ${respuesta.status}: ${(await respuesta.text()).slice(0,180)}`);
+  const datos = await respuesta.json();
+  if (!Array.isArray(datos)) throw new Error(`RPC ${nombre}: formato inválido`);
+  return datos;
+}
+
+function esConsultaComparativa(mensaje, historial = []) {
+  const q = normalizar(mensaje);
+  const premia = /grand prix|ganador|ganaron|premiad|sin premio|no ganaron|perdedor|shortlist|tendencia|evolucion|por anos|por ano|por años|por año/.test(q);
+  const compara = /compar|diferenc|patron|tendencia|evoluc|cambi|vs\b|versus|por que gan|que tienen en comun|que distingue|analiz/.test(q);
+  if (premia && compara) return true;
+  if (/tendencias? (creativas?|publicitarias?)|patrones? (creativos?|publicitarios?)/.test(q)) return true;
+  if (compara && Array.isArray(historial)) return historial.slice(-4).some(m =>
+    m.role === "user" && /grand prix|ganador|premiad|no ganaron|perdedor/.test(normalizar(m.content))
+  );
+  return false;
+}
+
+function parametrosComparativa(mensaje) {
+  const q = normalizar(mensaje);
+  const anios = [...q.matchAll(/\b(?:19|20)\d{2}\b/g)].map(m => Number(m[0]));
+  // Solo un año explícito se convierte en filtro: un rango se compara con series completas.
+  const p_anio = anios.length === 1 ? anios[0] : null;
+  const festival = q.includes("eurobest") ? "EUROBEST" : q.includes("cannes") ? "CANNES" :
+    q.includes("dubai lynx") ? "DUBAI LYNX" : null;
+  return { p_anio, p_festival: festival };
+}
+
+function contextoEstadisticoComparativa(filas, muestra, consulta) {
+  const anios = [...new Set(filas.map(r => r.anio))].sort();
+  const grupos = ["GRAND_PRIX", "GOLD", "SILVER", "BRONZE", "SHORTLIST", "SIN_PREMIO_DOCUMENTADO", "SIN_CLASIFICAR"];
+  const detalles = filas.map(r => `${r.anio} | ${r.festival}: ${r.grupo}=${r.cantidad}`).join("\n");
+  const totales = Object.fromEntries(grupos.map(g => [g, filas.filter(r => r.grupo === g).reduce((n,r) => n + Number(r.cantidad), 0)]));
+  const byYear = anios.map(y => {
+    const rows = filas.filter(r => r.anio === y);
+    const total = rows.reduce((n,r) => n + Number(r.cantidad), 0);
+    const grand = rows.filter(r=>r.grupo === 'GRAND_PRIX').reduce((n,r) => n + Number(r.cantidad), 0);
+    return `${y}: ${grand}/${total} registros con GP (${total ? (100 * grand / total).toFixed(1) : 0}% de esta BASE, no tasa de premios del festival)`;
+  });
+  const muestras = muestra.map(r => `${r.id}: ${r.grupo} (${r.anio}, ${r.festival})`).join('; ');
+  return `\n\nANÁLISIS CUANTITATIVO ESTRUCTURADO DE LA BASE (NO DE LOS FESTIVALES COMPLETOS):\nConsulta: ${consulta}\nAños presentes: ${anios.join(', ') || 'ninguno'}\nTotales por mejor reconocimiento de cada registro: ${JSON.stringify(totales)}\nSerie temporal: ${byYear.join('; ')}\nDesglose año-festival-grupo:\n${detalles}\nMUESTRA DOCUMENTAL RECUPERADA (ID: GRUPO): ${muestras}\n\nINSTRUCCIONES COMPARATIVAS OBLIGATORIAS:\n- Inicia con los datos y los años que realmente existen; no inventes años ni tendencias.\n- Una misma campaña puede figurar repetida entre festivales o piezas: compara registros, no ideas únicas.\n- Clasificación por mejor premio: GRAND_PRIX > GOLD > SILVER > BRONZE > SHORTLIST > SIN_PREMIO_DOCUMENTADO. Una campaña con Grand Prix y NO GANO en categorías distintas pertenece al grupo Grand Prix.\n- SIN_PREMIO_DOCUMENTADO exige NO GANO o Submitted sin premios ni Shortlist; no lo llames automáticamente 'campaña mala'.\n- Las proporciones describen solo esta base, sesgada por cobertura: nunca las llames probabilidad de ganar.\n- Compara mecanismo de idea, insight, ejecución y evidencia de resultados de los dos grupos a partir de los casos realmente suministrados, usando nombres y categoría.\n- La muestra es determinista, estratificada por año pero NO aleatoria; no infieras causalidad ni correlación robusta solo por 8-12 casos.\n- Distingue claramente: DATO VERIFICABLE / PATRÓN OBSERVADO / HIPÓTESIS POR VALIDAR.\n- Si solo existe un año en la base, NO afirmes ninguna evolución entre años.\n- Si faltan ejemplos de algún grupo, declara la limitación.\n- No afirmes que todas las piezas sin premio comparten una característica.\n`;
+}
+
 function pideGrandPrix(mensaje, historial) {
   const actual = normalizar(mensaje);
   if (/grand\s*prix/.test(actual)) return true;
@@ -580,7 +631,7 @@ function construirContexto(campanas, consulta) {
   return campanas.map((c, i) => {
     const board = String(c.analisis_board || "").replace(/\s+/g, " ").slice(0, disponible);
     return [
-      `CASO ${i + 1} | ID ${c.id}`,
+      `CASO ${i + 1} | ID ${c.id} | GRUPO COMPARATIVO: ${c.grupoComparativo || "NO APLICA"}`,
       `TITULO: ${c.titulo || "No registrado"}`,
       `MARCA: ${c.marca || "No registrada"}`,
       `FESTIVAL/AÑO: ${c.festival || "Sin dato"} / ${c.anio || "Sin dato"}`,
@@ -1163,15 +1214,41 @@ const esSeguimientoCorto =
   /^(si existe|sí existe|existe|dame su link|pasame su link|pásame su link|explicame mejor|explícame mejor|hablame de esa|háblame de esa)/i
     .test(normalizar(mensaje));
 
-const consultaBusqueda =
+let consultaBusqueda =
   esSeguimientoCorto && ultimoMensajeUsuario
     ? `${ultimoMensajeUsuario} ${mensaje}`
     : mensaje;
 
-// Búsqueda textual: ranking en SQL. Respaldo temporal si falta instalar el RPC.
-let busquedaTexto;
-let campanasRespaldo = null;
+const modoComparativo = esConsultaComparativa(mensaje, historialSeguro);
+let estadisticasComparativas = [];
+let muestraComparativa = [];
+let contextoComparativo = "";
+let busquedaTexto = { total: 0, registros: [] };
+let semanticas = [];
+let estadoSemantico = "no necesaria";
+let seleccionadas = [];
 let motorTexto = "supabase";
+if (modoComparativo) {
+  const parametros = parametrosComparativa(mensaje);
+  // Fallo explícito: NO sustituir por una muestra semántica engañosa.
+  [estadisticasComparativas, muestraComparativa] = await Promise.all([
+    rpcComparativas("festival_estadisticas_premios", parametros),
+    rpcComparativas("festival_muestra_comparativa", { ...parametros, p_por_grupo: 3 })
+  ]);
+  const ids = muestraComparativa.slice(0,12).map(f => f.id);
+  const detalles = await obtenerCampanasPorIds(ids);
+  const porId = new Map(detalles.map(c => [String(c.id),c]));
+  seleccionadas = ids.map(id => porId.get(String(id))).filter(Boolean);
+  // El contexto de las campañas incluirá el grupo emparejado por id.
+  const grupos = new Map(muestraComparativa.map(c => [String(c.id),c.grupo]));
+  seleccionadas = seleccionadas.map(c => ({ ...c, grupoComparativo: grupos.get(String(c.id)) }));
+  contextoComparativo = contextoEstadisticoComparativa(estadisticasComparativas, muestraComparativa, mensaje);
+  motorTexto = "comparacion-sql";
+} else {
+// Búsqueda textual: ranking en SQL. Respaldo temporal si falta instalar el RPC.
+
+let campanasRespaldo = null;
+motorTexto = "supabase";
 try {
   busquedaTexto = await buscarTextoEnSupabase(consultaBusqueda);
 } catch (error) {
@@ -1182,8 +1259,8 @@ try {
   busquedaTexto = buscarTexto(campanasRespaldo, consultaBusqueda);
 }
 
-let semanticas = [];
-let estadoSemantico = "correcta";
+semanticas = [];
+estadoSemantico = "correcta";
 try {
   semanticas = await buscarSemanticas(consultaBusqueda);
 } catch (error) {
@@ -1191,7 +1268,7 @@ try {
   console.warn("Festival AI - Búsqueda semántica:", error.message);
 }
 
-let seleccionadas;
+
 if (campanasRespaldo) {
   seleccionadas = combinarResultados(
     campanasRespaldo, semanticas, busquedaTexto, consultaBusqueda, 8
@@ -1203,6 +1280,9 @@ if (campanasRespaldo) {
   seleccionadas.sort((a, b) =>
     (ordenIds.get(String(a.id)) ?? 999) - (ordenIds.get(String(b.id)) ?? 999)
   );
+}
+
+
 }
 
     console.log(
@@ -1319,6 +1399,7 @@ No inventes casos para completar la lista.
 CAMPAÑAS RECUPERADAS:
 
 ${construirContexto(seleccionadas, consultaBusqueda) || "No se recuperaron casos."}
+${contextoComparativo}
 `;
 
     // ======================================
@@ -1421,6 +1502,8 @@ ${construirContexto(seleccionadas, consultaBusqueda) || "No se recuperaron casos
 
       casosAnalizados:
         seleccionadas.length,
+      modoComparativo,
+      distribucionPremios: modoComparativo ? estadisticasComparativas : undefined,
 
       busquedaSemantica:
         estadoSemantico,
